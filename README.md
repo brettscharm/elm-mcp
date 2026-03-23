@@ -49,7 +49,7 @@ cp .env.example .env
 
 ```
 doors-next-bob-integration/
-├── CLAUDE.md              # Instructions Bob reads automatically
+├── BOB.md                 # Instructions Bob reads automatically
 ├── README.md              # This file
 ├── doors_client.py        # DNG API client
 ├── doors_mcp_server.py    # MCP server (5 tools)

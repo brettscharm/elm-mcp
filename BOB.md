@@ -19,8 +19,8 @@ When a user says "connect to DNG" and the `doors-next` MCP server is NOT availab
 
 3. **Configure the MCP server** by adding it to your MCP settings file.
    The settings file location depends on the tool:
-   - **Claude Code CLI:** `~/.claude/settings.json` (add under `mcpServers`)
-   - **Claude Dev / Cline (VS Code):** Check the extension's MCP settings
+   - **Bob (VS Code):** Check Bob's MCP settings in VS Code
+   - **Other AI assistants:** Check the extension's MCP settings
 
    Add this entry (using the real absolute path from step 2):
    ```json
