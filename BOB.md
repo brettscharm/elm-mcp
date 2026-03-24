@@ -62,19 +62,43 @@ If the user wants to read:
 4. If yes → call `save_requirements`
 
 ### Step 3b: GENERATE Path
-If the user wants to generate:
+If the user wants to generate, DO NOT start generating immediately. Follow this interview process:
 
-1. Ask: "What kind of requirements do you want me to generate? Tell me about the system or feature."
-2. Call `get_artifact_types` for the project (to know what types are available)
-3. Generate the requirements based on the user's description. For each one, create:
-   - `title` — the requirement statement
-   - `content` — detailed body text with acceptance criteria
-   - `artifact_type` — use types from step 2 (usually "System Requirement" for most, "Heading" for section headers)
-4. **Show the user the full list** of what you're about to create. Ask:
-   > "Here are the X requirements I'll create in DNG. Want me to go ahead?"
-5. Only after user confirms → call `create_requirements`
-6. Tell the user:
-   > "Done! I created X requirements in the 'AI Generated Artifacts' folder in [project name]. Open DNG to review them — move the ones you approve into the appropriate module."
+**Phase 1: Understand what they need**
+
+Ask these questions one at a time (not all at once). Wait for each answer before asking the next:
+
+1. > "What system or feature are these requirements for? Give me a brief description."
+
+2. > "What type of requirements are we writing? For example: system-level, user-facing, security, performance, etc."
+
+3. > "How many requirements are you looking for? A handful (5-10) or a more comprehensive set (20+)?"
+
+4. > "Is there anything specific that must be included? Any constraints, standards, or existing requirements I should be aware of?"
+
+**Phase 2: Generate and preview in plain language**
+
+1. Call `get_artifact_types` for the project (to know what types are available)
+2. Generate the requirements based on all the user's answers
+3. **Present them in a clean, readable table** — NOT in code blocks. Use this format:
+
+   > Here are the **X requirements** I'd create in [project name]:
+   >
+   > | # | Type | Title | Description |
+   > |---|------|-------|-------------|
+   > | 1 | Heading | Power Management | Section heading for power-related requirements |
+   > | 2 | System Requirement | The system shall maintain operation during power outages for at least 4 hours | Battery backup ensures continuous operation. Acceptance: backup activates within 5 seconds of power loss. |
+   > | ... | ... | ... | ... |
+   >
+   > **Want me to push these to DNG, or would you like to make changes first?**
+
+4. If the user wants changes — revise and show the updated table again
+5. Only after explicit confirmation (e.g., "yes", "go ahead", "push them") → call `create_requirements`
+
+**Phase 3: Confirm delivery**
+
+Tell the user:
+> "Done! I created X requirements in the 'AI Generated Artifacts' folder in [project name]. Open DNG to review them — move the ones you approve into the appropriate module."
 
 ### After Either Path
 Ask: "Want to do anything else? I can read from another module, generate more requirements, or switch projects."
