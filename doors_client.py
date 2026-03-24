@@ -47,6 +47,24 @@ class DOORSNextClient:
         self.session = requests.Session()
         self._authenticated = False
 
+    @property
+    def _server_root(self) -> str:
+        """Server root URL (without /rm, /ccm, or /qm context root)"""
+        for suffix in ['/rm', '/ccm', '/qm']:
+            if self.base_url.endswith(suffix):
+                return self.base_url[:-len(suffix)]
+        return self.base_url
+
+    @property
+    def _ccm_url(self) -> str:
+        """EWM (CCM) base URL"""
+        return f"{self._server_root}/ccm"
+
+    @property
+    def _qm_url(self) -> str:
+        """ETM (QM) base URL"""
+        return f"{self._server_root}/qm"
+
     @classmethod
     def from_env(cls):
         """Create client from .env file"""
@@ -969,6 +987,364 @@ class DOORSNextClient:
                 .replace('>', '&gt;')
                 .replace('"', '&quot;')
                 .replace("'", '&apos;'))
+
+    def _extract_oslc_error(self, response_text: str) -> str:
+        """Extract error message from an OSLC error response"""
+        try:
+            root = ET.fromstring(response_text)
+            for elem in root.iter():
+                local = elem.tag.split('}')[-1] if '}' in elem.tag else elem.tag
+                if local == 'message' and elem.text:
+                    return elem.text.strip()
+        except Exception:
+            pass
+        return ''
+
+    # ── EWM (Engineering Workflow Management) ────────────────
+
+    def list_ewm_projects(self) -> List[Dict]:
+        """List all EWM projects from the OSLC workitems catalog"""
+        self._ensure_auth()
+        try:
+            resp = self.session.get(
+                f"{self._ccm_url}/oslc/workitems/catalog",
+                headers={
+                    'Accept': 'application/rdf+xml',
+                    'OSLC-Core-Version': '2.0',
+                },
+                timeout=self._TIMEOUT,
+            )
+            if resp.status_code != 200:
+                return []
+
+            root = ET.fromstring(resp.content)
+            ns = self._NS_OSLC
+            projects = []
+
+            for sp in root.findall('.//oslc:ServiceProvider', ns):
+                title_el = sp.find('dcterms:title', ns)
+                about = sp.get(f'{{{ns["rdf"]}}}about')
+                if title_el is not None and about:
+                    # Extract context ID from URL
+                    # Pattern: /ccm/oslc/contexts/{context_id}/workitems/services.xml
+                    context_id = ''
+                    if '/contexts/' in about:
+                        parts = about.split('/contexts/')
+                        if len(parts) > 1:
+                            context_id = parts[1].split('/')[0]
+                    projects.append({
+                        'title': title_el.text,
+                        'url': about,
+                        'id': context_id or (about.split('/')[-1] if '/' in about else about),
+                        'context_id': context_id,
+                    })
+
+            return projects
+        except Exception:
+            return []
+
+    def _get_ewm_creation_factories(self, service_provider_url: str) -> Dict[str, str]:
+        """Get EWM creation factory URLs from a service provider.
+
+        Returns dict mapping work item type to creation URL.
+        e.g. {'Task': 'https://...', 'Defect': 'https://...', 'Story': 'https://...'}
+        """
+        try:
+            resp = self.session.get(
+                service_provider_url,
+                headers={
+                    'Accept': 'application/rdf+xml',
+                    'OSLC-Core-Version': '2.0',
+                },
+                timeout=self._TIMEOUT,
+            )
+            if resp.status_code != 200:
+                return {}
+
+            root = ET.fromstring(resp.content)
+            ns = self._NS_OSLC
+
+            factories = {}
+            for cf in root.findall('.//oslc:CreationFactory', ns):
+                title_el = cf.find('dcterms:title', ns)
+                creation_el = cf.find('oslc:creation', ns)
+                if title_el is None or creation_el is None:
+                    continue
+                factory_title = (title_el.text or '').strip().lower()
+                creation_url = creation_el.get(f'{{{ns["rdf"]}}}resource', '')
+                if not creation_url:
+                    continue
+
+                # Match by title: "Location for creation of {Type} change requests"
+                if ' task ' in factory_title:
+                    factories['Task'] = creation_url
+                elif ' defect ' in factory_title:
+                    factories['Defect'] = creation_url
+                elif 'story' in factory_title:
+                    factories['Story'] = creation_url
+
+            return factories
+        except Exception:
+            return {}
+
+    def create_ewm_task(self, service_provider_url: str, title: str, description: str = '',
+                         requirement_url: Optional[str] = None) -> Optional[Dict]:
+        """Create a Task work item in EWM.
+
+        Args:
+            service_provider_url: EWM project's service provider URL
+            title: Task title (will be prefixed with [AI Generated])
+            description: Task description
+            requirement_url: Optional DNG requirement URL for calm:implementsRequirement link
+        """
+        self._ensure_auth()
+
+        factories = self._get_ewm_creation_factories(service_provider_url)
+        creation_url = factories.get('Task')
+        if not creation_url:
+            return {'error': 'No Task creation factory found for this project'}
+
+        prefixed_title = f"[AI Generated] {title}" if not title.startswith("[AI Generated]") else title
+        desc_body = f"[AI Generated by Bob]\n\n{description}" if description else "[AI Generated by Bob]"
+
+        # Build cross-tool link if requirement URL provided
+        link_element = ''
+        calm_ns = ''
+        if requirement_url:
+            calm_ns = '\n         xmlns:calm="http://jazz.net/xmlns/prod/jazz/calm/1.0/"'
+            link_element = f'\n    <calm:implementsRequirement rdf:resource="{requirement_url}"/>'
+
+        rdf = f'''<?xml version="1.0" encoding="UTF-8"?>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+         xmlns:dcterms="http://purl.org/dc/terms/"{calm_ns}>
+  <rdf:Description>
+    <dcterms:title>{self._escape_xml(prefixed_title)}</dcterms:title>
+    <dcterms:description>{self._escape_xml(desc_body)}</dcterms:description>{link_element}
+  </rdf:Description>
+</rdf:RDF>'''
+
+        try:
+            resp = self.session.post(
+                creation_url,
+                data=rdf.encode('utf-8'),
+                headers={
+                    'Content-Type': 'application/rdf+xml',
+                    'Accept': 'application/rdf+xml',
+                    'OSLC-Core-Version': '2.0',
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+                timeout=self._TIMEOUT,
+            )
+            if resp.status_code in [200, 201]:
+                return {
+                    'title': prefixed_title,
+                    'url': resp.headers.get('Location', ''),
+                }
+            error_msg = self._extract_oslc_error(resp.text)
+            return {'error': f"HTTP {resp.status_code}: {error_msg}" if error_msg else f"HTTP {resp.status_code}"}
+        except Exception as e:
+            return {'error': str(e)}
+
+    # ── ETM (Engineering Test Management) ─────────────────
+
+    def list_etm_projects(self) -> List[Dict]:
+        """List all ETM projects from the OSLC QM catalog"""
+        self._ensure_auth()
+        try:
+            resp = self.session.get(
+                f"{self._qm_url}/oslc_qm/catalog",
+                headers={
+                    'Accept': 'application/rdf+xml',
+                    'OSLC-Core-Version': '2.0',
+                },
+                timeout=self._TIMEOUT,
+            )
+            if resp.status_code != 200:
+                return []
+
+            root = ET.fromstring(resp.content)
+            ns = self._NS_OSLC
+            projects = []
+
+            for sp in root.findall('.//oslc:ServiceProvider', ns):
+                title_el = sp.find('dcterms:title', ns)
+                about = sp.get(f'{{{ns["rdf"]}}}about')
+                if title_el is not None and about:
+                    projects.append({
+                        'title': title_el.text,
+                        'url': about,
+                        'id': about.split('/')[-1] if '/' in about else about,
+                    })
+
+            return projects
+        except Exception:
+            return []
+
+    def _get_etm_creation_factories(self, service_provider_url: str) -> Dict[str, str]:
+        """Get ETM creation factory URLs from a service provider.
+
+        Returns dict mapping resource type to creation URL.
+        e.g. {'TestCase': 'https://...', 'TestResult': 'https://...'}
+        """
+        try:
+            resp = self.session.get(
+                service_provider_url,
+                headers={
+                    'Accept': 'application/rdf+xml',
+                    'OSLC-Core-Version': '2.0',
+                },
+                timeout=self._TIMEOUT,
+            )
+            if resp.status_code != 200:
+                return {}
+
+            root = ET.fromstring(resp.content)
+            ns = self._NS_OSLC
+
+            factories = {}
+            for cf in root.findall('.//oslc:CreationFactory', ns):
+                creation_el = cf.find('oslc:creation', ns)
+                if creation_el is None:
+                    continue
+                creation_url = creation_el.get(f'{{{ns["rdf"]}}}resource', '')
+                if not creation_url:
+                    continue
+
+                for rt in cf.findall('oslc:resourceType', ns):
+                    rt_uri = rt.get(f'{{{ns["rdf"]}}}resource', '')
+                    if 'TestCase' in rt_uri:
+                        factories['TestCase'] = creation_url
+                    elif 'TestScript' in rt_uri:
+                        factories['TestScript'] = creation_url
+                    elif 'TestResult' in rt_uri:
+                        factories['TestResult'] = creation_url
+                    elif 'TestExecutionRecord' in rt_uri:
+                        factories['TestExecutionRecord'] = creation_url
+                    elif 'TestPlan' in rt_uri:
+                        factories['TestPlan'] = creation_url
+
+            return factories
+        except Exception:
+            return {}
+
+    def create_test_case(self, service_provider_url: str, title: str,
+                          description: str = '',
+                          requirement_url: Optional[str] = None) -> Optional[Dict]:
+        """Create a Test Case in ETM.
+
+        Args:
+            service_provider_url: ETM project's service provider URL
+            title: Test case title (will be prefixed with [AI Generated])
+            description: Test case description/steps
+            requirement_url: Optional DNG requirement URL for oslc_qm:validatesRequirement link
+        """
+        self._ensure_auth()
+
+        factories = self._get_etm_creation_factories(service_provider_url)
+        creation_url = factories.get('TestCase')
+        if not creation_url:
+            return {'error': 'No TestCase creation factory found for this project'}
+
+        prefixed_title = f"[AI Generated] {title}" if not title.startswith("[AI Generated]") else title
+        desc_body = f"[AI Generated by Bob]\n\n{description}" if description else "[AI Generated by Bob]"
+
+        link_element = ''
+        if requirement_url:
+            link_element = f'\n    <oslc_qm:validatesRequirement rdf:resource="{requirement_url}"/>'
+
+        rdf = f'''<?xml version="1.0" encoding="UTF-8"?>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+         xmlns:dcterms="http://purl.org/dc/terms/"
+         xmlns:oslc_qm="http://open-services.net/ns/qm#">
+  <oslc_qm:TestCase>
+    <dcterms:title>{self._escape_xml(prefixed_title)}</dcterms:title>
+    <dcterms:description>{self._escape_xml(desc_body)}</dcterms:description>{link_element}
+  </oslc_qm:TestCase>
+</rdf:RDF>'''
+
+        try:
+            resp = self.session.post(
+                creation_url,
+                data=rdf.encode('utf-8'),
+                headers={
+                    'Content-Type': 'application/rdf+xml',
+                    'Accept': 'application/rdf+xml',
+                    'OSLC-Core-Version': '2.0',
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+                timeout=self._TIMEOUT,
+            )
+            if resp.status_code in [200, 201]:
+                return {
+                    'title': prefixed_title,
+                    'url': resp.headers.get('Location', ''),
+                }
+            error_msg = self._extract_oslc_error(resp.text)
+            return {'error': f"HTTP {resp.status_code}: {error_msg}" if error_msg else f"HTTP {resp.status_code}"}
+        except Exception as e:
+            return {'error': str(e)}
+
+    def create_test_result(self, service_provider_url: str, title: str,
+                            test_case_url: str, status: str = 'passed') -> Optional[Dict]:
+        """Create a Test Result in ETM.
+
+        Args:
+            service_provider_url: ETM project's service provider URL
+            title: Test result title (will be prefixed with [AI Generated])
+            test_case_url: URL of the Test Case this result reports on
+            status: Result status — 'passed', 'failed', 'blocked', 'incomplete', or 'error'
+        """
+        self._ensure_auth()
+
+        factories = self._get_etm_creation_factories(service_provider_url)
+        creation_url = factories.get('TestResult')
+        if not creation_url:
+            return {'error': 'No TestResult creation factory found for this project'}
+
+        prefixed_title = f"[AI Generated] {title}" if not title.startswith("[AI Generated]") else title
+
+        # Map friendly status to OSLC QM status values
+        status_map = {
+            'passed': 'com.ibm.rqm.execution.common.state.passed',
+            'failed': 'com.ibm.rqm.execution.common.state.failed',
+            'blocked': 'com.ibm.rqm.execution.common.state.blocked',
+            'incomplete': 'com.ibm.rqm.execution.common.state.incomplete',
+            'error': 'com.ibm.rqm.execution.common.state.error',
+        }
+        oslc_status = status_map.get(status.lower(), status)
+
+        rdf = f'''<?xml version="1.0" encoding="UTF-8"?>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+         xmlns:dcterms="http://purl.org/dc/terms/"
+         xmlns:oslc_qm="http://open-services.net/ns/qm#">
+  <oslc_qm:TestResult>
+    <dcterms:title>{self._escape_xml(prefixed_title)}</dcterms:title>
+    <oslc_qm:reportsOnTestCase rdf:resource="{test_case_url}"/>
+    <oslc_qm:status>{oslc_status}</oslc_qm:status>
+  </oslc_qm:TestResult>
+</rdf:RDF>'''
+
+        try:
+            resp = self.session.post(
+                creation_url,
+                data=rdf.encode('utf-8'),
+                headers={
+                    'Content-Type': 'application/rdf+xml',
+                    'Accept': 'application/rdf+xml',
+                    'OSLC-Core-Version': '2.0',
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+                timeout=self._TIMEOUT,
+            )
+            if resp.status_code in [200, 201]:
+                return {
+                    'title': prefixed_title,
+                    'url': resp.headers.get('Location', ''),
+                }
+            error_msg = self._extract_oslc_error(resp.text)
+            return {'error': f"HTTP {resp.status_code}: {error_msg}" if error_msg else f"HTTP {resp.status_code}"}
+        except Exception as e:
+            return {'error': str(e)}
 
     # ── Export ─────────────────────────────────────────────────
 

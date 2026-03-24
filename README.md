@@ -2,7 +2,7 @@
 
 An MCP server that lets Bob (or any AI coding assistant) read and write engineering artifacts across the IBM Engineering Lifecycle Management (ELM) suite -- DOORS Next (DNG), Engineering Workflow Management (EWM), and Engineering Test Management (ETM).
 
-**8 MCP tools** covering the full requirements-to-test lifecycle with read+write capabilities.
+**11 MCP tools** covering the full requirements-to-test lifecycle with read+write capabilities across DNG, EWM, and ETM.
 
 **This is NOT an official IBM product.** Built by Brett Scharmett and Bob for demo purposes.
 
@@ -68,7 +68,7 @@ doors-next-bob-integration/
 ├── LIFECYCLE.md           # Full lifecycle vision and status tracker
 ├── README.md              # This file
 ├── doors_client.py        # ELM API client (DNG + EWM + ETM)
-├── doors_mcp_server.py    # MCP server (8 tools)
+├── doors_mcp_server.py    # MCP server (11 tools)
 ├── requirements.txt       # Python dependencies
 └── .env.example           # Credential template
 ```

@@ -4,15 +4,18 @@ IBM ELM MCP Server for IBM Bob
 Provides tools for Bob to interact with IBM Engineering Lifecycle Management (ELM)
 Covers DNG (requirements), EWM (work items), and ETM (test management)
 
-Tools (8):
-  1. connect_to_dng          - Connect with credentials
-  2. list_projects           - List all DNG/EWM/ETM projects
-  3. get_modules             - Get modules from a project
-  4. get_module_requirements - Get requirements from a module
-  5. save_requirements       - Save requirements to a file (JSON/CSV/Markdown)
-  6. get_artifact_types      - Discover artifact types for a project
-  7. get_link_types          - Discover link types for a project
-  8. create_requirements     - Create requirements with links in a descriptive folder
+Tools (11):
+  1.  connect_to_dng          - Connect with credentials
+  2.  list_projects           - List DNG/EWM/ETM projects (domain parameter)
+  3.  get_modules             - Get modules from a DNG project
+  4.  get_module_requirements - Get requirements from a module
+  5.  save_requirements       - Save requirements to a file (JSON/CSV/Markdown)
+  6.  get_artifact_types      - Discover artifact types for a DNG project
+  7.  get_link_types          - Discover link types for a DNG project
+  8.  create_requirements     - Create requirements with links in a descriptive folder
+  9.  create_task             - Create an EWM Task with optional DNG requirement link
+  10. create_test_case        - Create an ETM Test Case with optional DNG requirement link
+  11. create_test_result      - Create an ETM Test Result (pass/fail) for a test case
 """
 
 import os
@@ -30,11 +33,14 @@ app = Server("doors-next-server")
 
 # ── Session State ─────────────────────────────────────────────
 _client: Optional[DOORSNextClient] = None
-_projects_cache: List[Dict] = []
-_modules_cache: Dict[str, List[Dict]] = {}   # project_id -> modules
+_projects_cache: List[Dict] = []              # DNG projects
+_ewm_projects_cache: List[Dict] = []          # EWM projects
+_etm_projects_cache: List[Dict] = []          # ETM projects
+_modules_cache: Dict[str, List[Dict]] = {}    # project_id -> modules
 _last_requirements: List[Dict] = []
 _last_module_name: str = ""
 _last_project_name: str = ""
+_folder_cache: Dict[str, Dict] = {}           # folder_name -> {title, url}
 
 
 def _get_or_create_client() -> Optional[DOORSNextClient]:
@@ -109,12 +115,19 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="list_projects",
             description=(
-                "List all available DOORS Next projects. "
-                "Returns a numbered list. Use the number or name with get_modules."
+                "List projects from IBM ELM. "
+                "Supports three domains: 'dng' (requirements), 'ewm' (work items), 'etm' (test management). "
+                "Defaults to 'dng'. Returns a numbered list."
             ),
             inputSchema={
                 "type": "object",
-                "properties": {},
+                "properties": {
+                    "domain": {
+                        "type": "string",
+                        "enum": ["dng", "ewm", "etm"],
+                        "description": "Which ELM domain to list projects from: 'dng' (default), 'ewm', or 'etm'"
+                    }
+                },
                 "required": []
             }
         ),
@@ -267,6 +280,97 @@ async def list_tools() -> list[Tool]:
                 "required": ["project_identifier"]
             }
         ),
+        Tool(
+            name="create_task",
+            description=(
+                "Create an EWM Task work item. "
+                "Optionally links to a DNG requirement via calm:implementsRequirement. "
+                "Use list_projects with domain='ewm' first to find the EWM project."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "ewm_project": {
+                        "type": "string",
+                        "description": "EWM project number (from list_projects domain=ewm) or name"
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Task title (will be prefixed with [AI Generated])"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Task description with details and acceptance criteria"
+                    },
+                    "requirement_url": {
+                        "type": "string",
+                        "description": "Optional: URL of a DNG requirement to link (Implements Requirement)"
+                    }
+                },
+                "required": ["ewm_project", "title"]
+            }
+        ),
+        Tool(
+            name="create_test_case",
+            description=(
+                "Create an ETM Test Case. "
+                "Optionally links to a DNG requirement via oslc_qm:validatesRequirement. "
+                "Use list_projects with domain='etm' first to find the ETM project."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "etm_project": {
+                        "type": "string",
+                        "description": "ETM project number (from list_projects domain=etm) or name"
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Test case title (will be prefixed with [AI Generated])"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Test case description and test steps"
+                    },
+                    "requirement_url": {
+                        "type": "string",
+                        "description": "Optional: URL of a DNG requirement to link (Validates Requirement)"
+                    }
+                },
+                "required": ["etm_project", "title"]
+            }
+        ),
+        Tool(
+            name="create_test_result",
+            description=(
+                "Create an ETM Test Result for a test case. "
+                "Records a pass/fail/blocked/incomplete/error result. "
+                "Requires the test case URL from create_test_case output."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "etm_project": {
+                        "type": "string",
+                        "description": "ETM project number (from list_projects domain=etm) or name"
+                    },
+                    "test_case_url": {
+                        "type": "string",
+                        "description": "URL of the Test Case this result reports on (from create_test_case)"
+                    },
+                    "status": {
+                        "type": "string",
+                        "enum": ["passed", "failed", "blocked", "incomplete", "error"],
+                        "description": "Test result status"
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Optional result title (auto-generated if omitted)"
+                    }
+                },
+                "required": ["etm_project", "test_case_url", "status"]
+            }
+        ),
     ]
 
 
@@ -274,8 +378,9 @@ async def list_tools() -> list[Tool]:
 
 @app.call_tool()
 async def call_tool(name: str, arguments: Any) -> list[TextContent]:
-    global _client, _projects_cache, _modules_cache
-    global _last_requirements, _last_module_name, _last_project_name
+    global _client, _projects_cache, _ewm_projects_cache, _etm_projects_cache
+    global _modules_cache, _last_requirements, _last_module_name, _last_project_name
+    global _folder_cache
 
     try:
         # ── connect_to_dng ────────────────────────────────────
@@ -317,19 +422,37 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
 
         # ── list_projects ─────────────────────────────────────
         if name == "list_projects":
-            if not _projects_cache:
-                _projects_cache = client.list_projects()
+            domain = arguments.get("domain", "dng").lower()
 
-            if not _projects_cache:
+            if domain == "ewm":
+                if not _ewm_projects_cache:
+                    _ewm_projects_cache = client.list_ewm_projects()
+                projects = _ewm_projects_cache
+                label = "EWM (Engineering Workflow Management)"
+                hint = "Use `create_task` with an EWM project number or name."
+            elif domain == "etm":
+                if not _etm_projects_cache:
+                    _etm_projects_cache = client.list_etm_projects()
+                projects = _etm_projects_cache
+                label = "ETM (Engineering Test Management)"
+                hint = "Use `create_test_case` with an ETM project number or name."
+            else:
+                if not _projects_cache:
+                    _projects_cache = client.list_projects()
+                projects = _projects_cache
+                label = "DNG (DOORS Next Generation)"
+                hint = "Use `get_modules` with a project number or name to see its modules."
+
+            if not projects:
                 return [TextContent(type="text", text=(
-                    "No projects found. Check your permissions or server URL."
+                    f"No {domain.upper()} projects found. Check your permissions or server URL."
                 ))]
 
-            lines = [f"# DOORS Next Projects ({len(_projects_cache)} total)\n"]
-            for i, p in enumerate(_projects_cache, 1):
+            lines = [f"# {label} Projects ({len(projects)} total)\n"]
+            for i, p in enumerate(projects, 1):
                 lines.append(f"{i}. **{p['title']}**")
 
-            lines.append(f"\nUse `get_modules` with a project number or name to see its modules.")
+            lines.append(f"\n{hint}")
             return [TextContent(type="text", text="\n".join(lines))]
 
         # ── get_modules ───────────────────────────────────────
@@ -605,8 +728,10 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                     "Check your permissions."
                 ))]
 
-            # Find or create the named folder
-            folder = client.find_folder(project['url'], folder_name)
+            # Find or create the named folder (check cache first)
+            folder = _folder_cache.get(folder_name)
+            if not folder:
+                folder = client.find_folder(project['url'], folder_name)
             if not folder:
                 folder = client.create_folder(project['url'], folder_name)
                 if not folder:
@@ -614,6 +739,8 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                         f"Failed to create '{folder_name}' folder. "
                         "Check your write permissions for this project."
                     ))]
+            # Cache for subsequent calls in the same session
+            _folder_cache[folder_name] = folder
 
             folder_url = folder['url']
 
@@ -695,6 +822,166 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             )
 
             return [TextContent(type="text", text="\n".join(lines))]
+
+        # ── create_task (EWM) ─────────────────────────────────
+        elif name == "create_task":
+            ewm_proj = arguments.get("ewm_project", "")
+            title = arguments.get("title", "")
+            description = arguments.get("description", "")
+            requirement_url = arguments.get("requirement_url", "")
+
+            if not ewm_proj or not title:
+                return [TextContent(type="text", text="Error: ewm_project and title are required.")]
+
+            # Ensure EWM projects are loaded
+            if not _ewm_projects_cache:
+                _ewm_projects_cache = client.list_ewm_projects()
+
+            if not _ewm_projects_cache:
+                return [TextContent(type="text", text=(
+                    "No EWM projects found. Ensure the server has a /ccm context root "
+                    "and your credentials have EWM access."
+                ))]
+
+            project = _find_by_identifier(_ewm_projects_cache, ewm_proj)
+            if not project:
+                names = "\n".join(f"{i}. {p['title']}" for i, p in enumerate(_ewm_projects_cache, 1))
+                return [TextContent(type="text", text=(
+                    f"EWM project not found: '{ewm_proj}'\n\nAvailable EWM projects:\n{names}"
+                ))]
+
+            result = client.create_ewm_task(
+                service_provider_url=project['url'],
+                title=title,
+                description=description,
+                requirement_url=requirement_url or None,
+            )
+
+            if result and 'error' not in result:
+                link_note = ""
+                if requirement_url:
+                    link_note = f"\n- Linked to requirement: `{requirement_url}`"
+                return [TextContent(type="text", text=(
+                    f"# Task Created in EWM\n\n"
+                    f"- **Title:** {result['title']}\n"
+                    f"- **Project:** {project['title']}\n"
+                    f"- **URL:** {result['url']}{link_note}\n\n"
+                    f"The task has been created with `[AI Generated]` prefix. "
+                    f"A project lead can assign it to an iteration and developer."
+                ))]
+            else:
+                error_detail = result.get('error', '') if result else ''
+                return [TextContent(type="text", text=(
+                    f"Failed to create task in '{project['title']}'.\n"
+                    f"{error_detail}\n\n"
+                    "This may be a permissions issue — try a different EWM project."
+                ))]
+
+        # ── create_test_case (ETM) ────────────────────────────
+        elif name == "create_test_case":
+            etm_proj = arguments.get("etm_project", "")
+            title = arguments.get("title", "")
+            description = arguments.get("description", "")
+            requirement_url = arguments.get("requirement_url", "")
+
+            if not etm_proj or not title:
+                return [TextContent(type="text", text="Error: etm_project and title are required.")]
+
+            # Ensure ETM projects are loaded
+            if not _etm_projects_cache:
+                _etm_projects_cache = client.list_etm_projects()
+
+            if not _etm_projects_cache:
+                return [TextContent(type="text", text=(
+                    "No ETM projects found. Ensure the server has a /qm context root "
+                    "and your credentials have ETM access."
+                ))]
+
+            project = _find_by_identifier(_etm_projects_cache, etm_proj)
+            if not project:
+                names = "\n".join(f"{i}. {p['title']}" for i, p in enumerate(_etm_projects_cache, 1))
+                return [TextContent(type="text", text=(
+                    f"ETM project not found: '{etm_proj}'\n\nAvailable ETM projects:\n{names}"
+                ))]
+
+            result = client.create_test_case(
+                service_provider_url=project['url'],
+                title=title,
+                description=description,
+                requirement_url=requirement_url or None,
+            )
+
+            if result and 'error' not in result:
+                link_note = ""
+                if requirement_url:
+                    link_note = f"\n- Validates requirement: `{requirement_url}`"
+                return [TextContent(type="text", text=(
+                    f"# Test Case Created in ETM\n\n"
+                    f"- **Title:** {result['title']}\n"
+                    f"- **Project:** {project['title']}\n"
+                    f"- **URL:** {result['url']}{link_note}\n\n"
+                    f"Use this URL with `create_test_result` to record pass/fail results."
+                ))]
+            else:
+                error_detail = result.get('error', '') if result else ''
+                return [TextContent(type="text", text=(
+                    f"Failed to create test case in '{project['title']}'.\n"
+                    f"{error_detail}\n\n"
+                    "This may be a permissions issue — try a different ETM project."
+                ))]
+
+        # ── create_test_result (ETM) ──────────────────────────
+        elif name == "create_test_result":
+            etm_proj = arguments.get("etm_project", "")
+            test_case_url = arguments.get("test_case_url", "")
+            status = arguments.get("status", "passed")
+            title = arguments.get("title", "")
+
+            if not etm_proj or not test_case_url or not status:
+                return [TextContent(type="text", text=(
+                    "Error: etm_project, test_case_url, and status are required."
+                ))]
+
+            # Auto-generate title if not provided
+            if not title:
+                title = f"Test Result - {status.capitalize()}"
+
+            # Ensure ETM projects are loaded
+            if not _etm_projects_cache:
+                _etm_projects_cache = client.list_etm_projects()
+
+            project = _find_by_identifier(_etm_projects_cache, etm_proj)
+            if not project:
+                names = "\n".join(f"{i}. {p['title']}" for i, p in enumerate(_etm_projects_cache, 1))
+                return [TextContent(type="text", text=(
+                    f"ETM project not found: '{etm_proj}'\n\nAvailable ETM projects:\n{names}"
+                ))]
+
+            result = client.create_test_result(
+                service_provider_url=project['url'],
+                title=title,
+                test_case_url=test_case_url,
+                status=status,
+            )
+
+            if result and 'error' not in result:
+                status_emoji = {"passed": "PASS", "failed": "FAIL", "blocked": "BLOCKED",
+                                "incomplete": "INCOMPLETE", "error": "ERROR"}.get(status.lower(), status.upper())
+                return [TextContent(type="text", text=(
+                    f"# Test Result Recorded in ETM\n\n"
+                    f"- **Result:** {status_emoji}\n"
+                    f"- **Title:** {result['title']}\n"
+                    f"- **Project:** {project['title']}\n"
+                    f"- **Reports on:** `{test_case_url}`\n"
+                    f"- **URL:** {result['url']}"
+                ))]
+            else:
+                error_detail = result.get('error', '') if result else ''
+                return [TextContent(type="text", text=(
+                    f"Failed to create test result in '{project['title']}'.\n"
+                    f"{error_detail}\n\n"
+                    "This may be a permissions issue — try a different ETM project."
+                ))]
 
         else:
             return [TextContent(type="text", text=f"Unknown tool: {name}")]

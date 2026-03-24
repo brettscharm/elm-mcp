@@ -43,28 +43,28 @@ The human stays in control at every gate. ELM provides the audit trail.
 
 ---
 
-### Phase 2: Development Planning (EWM) 🔧 IN PROGRESS
+### Phase 2: Development Planning (EWM) ✅ BUILT
 
 **What Bob does:**
 1. Bob reads ONLY Approved requirements from DNG
 2. If any are not Approved, Bob warns: "These requirements aren't approved yet — proceed anyway?"
-3. Bob generates Stories and Tasks with acceptance criteria derived from requirements
+3. Bob generates Tasks with acceptance criteria derived from requirements
 4. User previews, confirms → Bob pushes to EWM with `[AI Generated]` prefix
 5. Each work item linked to its source requirement (`Implements Requirement`)
 
 **Human gate:** Assign work items to iterations → prioritize → assign to developers
 
 **ELM artifacts created:**
-- Stories, Tasks, Defects in EWM
-- Cross-tool links: EWM work item → DNG requirement
+- Tasks in EWM (via `create_task` MCP tool)
+- Cross-tool links: EWM Task → DNG requirement (calm:implementsRequirement)
 
 **Status:**
-- ✅ Task creation confirmed working
-- ✅ Cross-tool link: Task → DNG Requirement (calm:implementsRequirement)
 - ✅ EWM project discovery works (101 projects found)
-- ✅ Work item type discovery works (Story, Task, Defect, Epic, etc.)
-- ✅ Filed Against category discovery works (50 categories)
-- 🔧 Story/Defect creation needs Filed Against namespace fix (in progress)
+- ✅ EWM creation factory discovery (Task, Defect, Story factories)
+- ✅ Task creation via MCP tool — tested against live server (201 Created)
+- ✅ Cross-tool link: Task → DNG Requirement (calm:implementsRequirement)
+- ✅ OSLC error messages surfaced to user (permissions, etc.)
+- 🔧 Story/Defect creation skipped for now (Filed Against namespace issue)
 
 ---
 
@@ -182,31 +182,24 @@ Every artifact is:
 
 ## What's Built Today
 
-| Capability | Tool | Status |
-|-----------|------|--------|
-| Connect to ELM | DNG | ✅ |
-| List projects | DNG | ✅ |
-| Read modules | DNG | ✅ |
-| Read requirements with attributes | DNG | ✅ |
-| Generate requirements (interview → preview → push) | DNG | ✅ |
-| Create folders | DNG | ✅ |
-| Create links (25 types) | DNG | ✅ |
-| Artifact type discovery (26 types/project) | DNG | ✅ |
-| Link type discovery | DNG | ✅ |
-| Status-based guardrails | DNG | ✅ |
-| Save to file (JSON/CSV/MD) | Local | ✅ |
-| List EWM projects (101) | EWM | ✅ |
-| Create Tasks | EWM | ✅ |
-| Cross-tool link: Task → Requirement | EWM | ✅ |
-| Discover work item types | EWM | ✅ |
-| Discover Filed Against categories | EWM | ✅ |
-| Create Stories/Defects | EWM | 🔧 |
-| List ETM projects (77) | ETM | ✅ |
-| Create Test Cases | ETM | ✅ |
-| Create Test Scripts | ETM | ✅ |
-| Create Test Execution Records | ETM | ✅ |
-| Create Test Results (pass/fail) | ETM | ✅ |
-| Cross-tool link: Test Case → Requirement | ETM | ✅ |
+| Capability | Domain | MCP Tool | Status |
+|-----------|--------|----------|--------|
+| Connect to ELM | All | `connect_to_dng` | ✅ |
+| List projects (DNG/EWM/ETM) | All | `list_projects` | ✅ |
+| Read modules | DNG | `get_modules` | ✅ |
+| Read requirements with attributes | DNG | `get_module_requirements` | ✅ |
+| Generate requirements (interview → preview → push) | DNG | `create_requirements` | ✅ |
+| Create folders | DNG | (internal) | ✅ |
+| Create links (25 types) | DNG | `create_requirements` | ✅ |
+| Artifact type discovery | DNG | `get_artifact_types` | ✅ |
+| Link type discovery | DNG | `get_link_types` | ✅ |
+| Save to file (JSON/CSV/MD) | Local | `save_requirements` | ✅ |
+| Create Tasks | EWM | `create_task` | ✅ |
+| Cross-tool link: Task → Requirement | EWM | `create_task` | ✅ |
+| Create Test Cases | ETM | `create_test_case` | ✅ |
+| Cross-tool link: Test Case → Requirement | ETM | `create_test_case` | ✅ |
+| Create Test Results (pass/fail) | ETM | `create_test_result` | ✅ |
+| Create Stories/Defects | EWM | — | 🔧 Skipped |
 
 ---
 
