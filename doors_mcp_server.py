@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
 """
-DOORS Next MCP Server for IBM Bob
-Provides tools for Bob to interact with IBM DOORS Next Generation
+IBM ELM MCP Server for IBM Bob
+Provides tools for Bob to interact with IBM Engineering Lifecycle Management (ELM)
+Covers DNG (requirements), EWM (work items), and ETM (test management)
 
-Tools:
-  1. connect_to_dng     - Connect with credentials
-  2. list_projects      - List all DNG projects
-  3. get_modules        - Get modules from a project
+Tools (8):
+  1. connect_to_dng          - Connect with credentials
+  2. list_projects           - List all DNG/EWM/ETM projects
+  3. get_modules             - Get modules from a project
   4. get_module_requirements - Get requirements from a module
-  5. save_requirements  - Save requirements to a file
+  5. save_requirements       - Save requirements to a file (JSON/CSV/Markdown)
+  6. get_artifact_types      - Discover artifact types for a project
+  7. get_link_types          - Discover link types for a project
+  8. create_requirements     - Create requirements with links in a descriptive folder
 """
 
 import os
@@ -178,9 +182,9 @@ async def list_tools() -> list[Tool]:
             name="create_requirements",
             description=(
                 "Create AI-generated requirements in a DOORS Next project. "
-                "Requirements are placed in an 'AI Generated Artifacts' folder "
-                "with [AI Generated] prefix. The human reviewer then moves them "
-                "into the appropriate module in DNG. "
+                "Requirements are placed in a descriptive folder named "
+                "'AI Generated - [username] - [summary]' with [AI Generated] prefix. "
+                "The human reviewer then moves them into the appropriate module in DNG. "
                 "Each requirement needs a title, content, and artifact type."
             ),
             inputSchema={

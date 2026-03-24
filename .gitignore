@@ -56,6 +56,11 @@ requirements.json
 requirements.md
 *.csv
 
+# Exploration/test output files
+*_exploration.txt
+*_edge_cases.txt
+*_audit.txt
+
 # Archive directories
 archive_*/
 

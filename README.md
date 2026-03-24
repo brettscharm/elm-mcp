@@ -1,6 +1,8 @@
-# DOORS Next AI Agent
+# IBM ELM AI Agent
 
-An MCP server that lets Bob (or any AI coding assistant) pull requirements from IBM DOORS Next Generation.
+An MCP server that lets Bob (or any AI coding assistant) read and write engineering artifacts across the IBM Engineering Lifecycle Management (ELM) suite -- DOORS Next (DNG), Engineering Workflow Management (EWM), and Engineering Test Management (ETM).
+
+**8 MCP tools** covering the full requirements-to-test lifecycle with read+write capabilities.
 
 **This is NOT an official IBM product.** Built by Brett Scharmett and Bob for demo purposes.
 
@@ -24,13 +26,25 @@ You'll need to **restart VS Code once** after the first setup so the MCP server 
 
 ---
 
-## What Happens
+## What It Does
 
-1. **Connect** — Bob asks for your DNG server URL, username, and password
-2. **Projects** — "There are 107 projects. Want me to list them?"
-3. **Modules** — "What are the modules in [project name]?"
-4. **Requirements** — "Get requirements from [module name]"
-5. **Save** — "Want me to save these?" (JSON, CSV, or Markdown)
+**Read (DNG):**
+1. **Connect** — Bob asks for your ELM server URL, username, and password
+2. **Projects** — List all 107 DNG projects, 101 EWM projects, or 77 ETM projects
+3. **Modules** — Browse modules from any project
+4. **Requirements** — Read requirements with full attributes, custom fields, and 26 artifact types
+5. **Link Types** — Discover all 25 link types (Satisfies, Elaborated By, etc.)
+6. **Save** — Export to JSON, CSV, or Markdown
+
+**Write (DNG):**
+7. **Create** — Generate requirements with [AI Generated] prefix, rich XHTML content, and links
+8. **Organize** — Create descriptive folders for AI-generated artifacts
+
+**Full Lifecycle (DNG + EWM + ETM):**
+- Create a requirement in DNG
+- Create a Task in EWM linked to that requirement
+- Create a Test Case, Test Script, Test Execution Record, and Test Result in ETM linked back to the requirement
+- All 6 lifecycle artifacts confirmed working against live IBM ELM server
 
 ---
 
@@ -50,9 +64,11 @@ cp .env.example .env
 ```
 doors-next-bob-integration/
 ├── BOB.md                 # Instructions Bob reads automatically
+├── CLAUDE.md              # Instructions for Claude Code
+├── LIFECYCLE.md           # Full lifecycle vision and status tracker
 ├── README.md              # This file
-├── doors_client.py        # DNG API client
-├── doors_mcp_server.py    # MCP server (5 tools)
+├── doors_client.py        # ELM API client (DNG + EWM + ETM)
+├── doors_mcp_server.py    # MCP server (8 tools)
 ├── requirements.txt       # Python dependencies
 └── .env.example           # Credential template
 ```

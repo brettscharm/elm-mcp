@@ -59,33 +59,41 @@ The human stays in control at every gate. ELM provides the audit trail.
 - Cross-tool links: EWM work item → DNG requirement
 
 **Status:**
-- ✅ Task creation works
+- ✅ Task creation confirmed working
+- ✅ Cross-tool link: Task → DNG Requirement (calm:implementsRequirement)
 - ✅ EWM project discovery works (101 projects found)
 - ✅ Work item type discovery works (Story, Task, Defect, Epic, etc.)
 - ✅ Filed Against category discovery works (50 categories)
-- 🔧 Story/Defect creation needs Filed Against namespace fix
+- 🔧 Story/Defect creation needs Filed Against namespace fix (in progress)
 
 ---
 
-### Phase 3: Test Planning (ETM) 🔜 NEXT
+### Phase 3: Test Planning & Execution (ETM) ✅ BUILT
 
 **What Bob does:**
 1. Bob reads Approved requirements from DNG
 2. Bob generates Test Cases with test steps derived from acceptance criteria
 3. Bob generates Test Scripts (manual or automated)
 4. User previews, confirms → Bob pushes to ETM with `[AI Generated]` prefix
-5. Each test case linked to:
-   - Its source requirement (`Validates Requirement`)
-   - Its implementing story (`Tests Work Item`)
+5. Each test case linked to its source requirement (`oslc_qm:validatesRequirement`)
+6. Bob creates Test Execution Records and records Test Results with pass/fail
 
-**Human gate:** Review test plan → approve test cases
+**Human gate:** Review test plan → approve test cases → review test results
 
 **ELM artifacts created:**
 - Test Cases in ETM
-- Test Scripts
-- Cross-tool links: ETM test case → DNG requirement → EWM work item
+- Test Scripts in ETM
+- Test Execution Records in ETM
+- Test Results (pass/fail) in ETM
+- Cross-tool links: ETM test case → DNG requirement
 
-**Status:** 🔜 Not started — same OSLC pattern as DNG
+**Status:**
+- ✅ ETM project discovery works (77 projects found)
+- ✅ Test Case creation works
+- ✅ Test Script creation works
+- ✅ Test Execution Record creation works
+- ✅ Test Result creation with pass/fail works
+- ✅ Cross-tool link: Test Case → DNG Requirement (oslc_qm:validatesRequirement)
 
 ---
 
@@ -127,7 +135,7 @@ The human stays in control at every gate. ELM provides the audit trail.
 - Test Results (Pass/Fail)
 - Defects in EWM (if tests fail)
 
-**Status:** 🔜 Not started
+**Status:** ✅ Test Execution Records and Test Results (pass/fail) confirmed working in ETM
 
 ---
 
@@ -183,14 +191,22 @@ Every artifact is:
 | Generate requirements (interview → preview → push) | DNG | ✅ |
 | Create folders | DNG | ✅ |
 | Create links (25 types) | DNG | ✅ |
-| Artifact type discovery | DNG | ✅ |
+| Artifact type discovery (26 types/project) | DNG | ✅ |
 | Link type discovery | DNG | ✅ |
 | Status-based guardrails | DNG | ✅ |
 | Save to file (JSON/CSV/MD) | Local | ✅ |
-| List EWM projects | EWM | ✅ |
+| List EWM projects (101) | EWM | ✅ |
 | Create Tasks | EWM | ✅ |
+| Cross-tool link: Task → Requirement | EWM | ✅ |
 | Discover work item types | EWM | ✅ |
 | Discover Filed Against categories | EWM | ✅ |
+| Create Stories/Defects | EWM | 🔧 |
+| List ETM projects (77) | ETM | ✅ |
+| Create Test Cases | ETM | ✅ |
+| Create Test Scripts | ETM | ✅ |
+| Create Test Execution Records | ETM | ✅ |
+| Create Test Results (pass/fail) | ETM | ✅ |
+| Cross-tool link: Test Case → Requirement | ETM | ✅ |
 
 ---
 
