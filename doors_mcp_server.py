@@ -211,6 +211,14 @@ async def list_tools() -> list[Tool]:
                                 "artifact_type": {
                                     "type": "string",
                                     "description": "Artifact type name (e.g., 'System Requirement', 'Heading', 'User Requirement')"
+                                },
+                                "link_type": {
+                                    "type": "string",
+                                    "description": "Optional: Link type name (e.g., 'Satisfies', 'Elaborated By') from get_link_types"
+                                },
+                                "link_to": {
+                                    "type": "string",
+                                    "description": "Optional: URL of the requirement to link to"
                                 }
                             },
                             "required": ["title", "content", "artifact_type"]
@@ -218,6 +226,24 @@ async def list_tools() -> list[Tool]:
                     }
                 },
                 "required": ["project_identifier", "folder_name", "requirements"]
+            }
+        ),
+        Tool(
+            name="get_link_types",
+            description=(
+                "Get all available link types for a DOORS Next project. "
+                "Use this to find the correct link type when creating linked requirements "
+                "(e.g., Satisfies, Elaborated By, etc.)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "project_identifier": {
+                        "type": "string",
+                        "description": "Project number or name"
+                    }
+                },
+                "required": ["project_identifier"]
             }
         ),
         Tool(
@@ -481,6 +507,38 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                 f"- Project: {_last_project_name}"
             ))]
 
+        # ── get_link_types ────────────────────────────────────
+        elif name == "get_link_types":
+            proj_id = arguments.get("project_identifier", "")
+            if not proj_id:
+                return [TextContent(type="text", text="Error: project_identifier is required.")]
+
+            if not _projects_cache:
+                _projects_cache = client.list_projects()
+
+            project = _find_by_identifier(_projects_cache, proj_id)
+            if not project:
+                return [TextContent(type="text", text=f"Project not found: '{proj_id}'")]
+
+            link_types = client.get_link_types(project['url'])
+            if not link_types:
+                return [TextContent(type="text", text=(
+                    f"Could not retrieve link types for '{project['title']}'."
+                ))]
+
+            lines = [
+                f"# Link Types in '{project['title']}'\n",
+                f"Found **{len(link_types)}** link type(s):\n",
+            ]
+            for i, lt in enumerate(link_types, 1):
+                lines.append(f"{i}. **{lt['name']}**")
+
+            lines.append(
+                "\nUse these names with `create_requirements` in the `link_type` field "
+                "to create linked requirements."
+            )
+            return [TextContent(type="text", text="\n".join(lines))]
+
         # ── get_artifact_types ─────────────────────────────────
         elif name == "get_artifact_types":
             proj_id = arguments.get("project_identifier", "")
@@ -555,6 +613,13 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
 
             folder_url = folder['url']
 
+            # Resolve link types if any requirements have links
+            link_type_map = {}
+            has_links = any(req.get('link_type') for req in reqs_data)
+            if has_links:
+                link_types = client.get_link_types(project['url'])
+                link_type_map = {lt['name'].lower(): lt['uri'] for lt in link_types}
+
             # Create each requirement
             created = []
             failed = []
@@ -576,12 +641,27 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                     failed.append(f"'{title[:40]}' - unknown artifact type '{artifact_type}'")
                     continue
 
+                # Resolve link type if specified
+                link_uri = None
+                link_target = req.get('link_to')
+                link_type_name = req.get('link_type', '')
+                if link_type_name and link_target:
+                    link_uri = link_type_map.get(link_type_name.lower())
+                    if not link_uri:
+                        # Try partial match
+                        for lt_name, lt_uri in link_type_map.items():
+                            if link_type_name.lower() in lt_name:
+                                link_uri = lt_uri
+                                break
+
                 result = client.create_requirement(
                     project_url=project['url'],
                     title=title,
                     content=content,
                     shape_url=shape_url,
                     folder_url=folder_url,
+                    link_uri=link_uri,
+                    link_target_url=link_target,
                 )
 
                 if result:

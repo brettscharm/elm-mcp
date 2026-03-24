@@ -693,6 +693,107 @@ class DOORSNextClient:
         except Exception:
             return None
 
+    # ── Write: Link Types ─────────────────────────────────────
+
+    def get_link_types(self, project_url: str) -> List[Dict]:
+        """Get all available link types for a project.
+
+        Returns list of dicts with 'name' and 'uri' for each link type.
+        """
+        self._ensure_auth()
+        project_area_id = self._extract_project_area_id(project_url)
+        project_area_url = f"{self.base_url}/process/project-areas/{project_area_id}"
+
+        import urllib.parse
+        encoded_pa = urllib.parse.quote(project_area_url, safe='')
+
+        try:
+            resp = self.session.get(
+                f"{self.base_url}/linkTypeQuery?projectURL={encoded_pa}",
+                headers={
+                    'Accept': 'application/rdf+xml',
+                    'OSLC-Core-Version': '2.0',
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+                timeout=self._TIMEOUT,
+            )
+            if resp.status_code != 200:
+                return []
+
+            root = ET.fromstring(resp.content)
+            ns_dng = 'http://jazz.net/ns/rm/dng/types#'
+            ns_rdfs = 'http://www.w3.org/2000/01/rdf-schema#'
+
+            link_type_uris = []
+            for member in root.findall(f'.//{{{ns_rdfs}}}member'):
+                lt = member.find(f'{{{ns_dng}}}LinkType')
+                if lt is not None:
+                    uri = lt.get(f'{{{self._NS_OSLC["rdf"]}}}about', '')
+                    if uri:
+                        link_type_uris.append(uri)
+
+            # Resolve names for custom link types (project-specific URLs)
+            link_types = []
+            for uri in link_type_uris:
+                name = self._resolve_link_type_name(uri)
+                if name:
+                    link_types.append({'name': name, 'uri': uri})
+
+            return link_types
+        except Exception:
+            return []
+
+    def _resolve_link_type_name(self, uri: str) -> str:
+        """Resolve a link type URI to its display name"""
+        # Standard OSLC RM link types
+        standard_names = {
+            'http://open-services.net/ns/rm#elaboratedBy': 'Elaborated By',
+            'http://open-services.net/ns/rm#elaborates': 'Elaborates',
+            'http://open-services.net/ns/rm#specifiedBy': 'Specified By',
+            'http://open-services.net/ns/rm#specifies': 'Specifies',
+            'http://open-services.net/ns/rm#validatedBy': 'Validated By',
+            'http://open-services.net/ns/rm#implementedBy': 'Implemented By',
+            'http://open-services.net/ns/rm#affectedBy': 'Affected By',
+            'http://open-services.net/ns/rm#trackedBy': 'Tracked By',
+            'http://jazz.net/ns/dm/linktypes#derives': 'Derives (Architecture)',
+            'http://jazz.net/ns/dm/linktypes#satisfy': 'Satisfies (Architecture)',
+            'http://jazz.net/ns/dm/linktypes#refine': 'Refines (Architecture)',
+            'http://jazz.net/ns/dm/linktypes#trace': 'Trace (Architecture)',
+            'http://www.ibm.com/xmlns/rdm/types/Decomposition': 'Decomposition',
+            'http://www.ibm.com/xmlns/rdm/types/Extraction': 'Extraction',
+            'http://www.ibm.com/xmlns/rdm/types/Embedding': 'Embedding',
+            'http://www.ibm.com/xmlns/rdm/types/SynonymLink': 'Synonym',
+            'http://www.ibm.com/xmlns/rdm/types/ArtifactTermReferenceLink': 'Term Reference',
+            'http://www.ibm.com/xmlns/rdm/types/Link': 'Link',
+            'http://purl.org/dc/terms/references': 'References',
+        }
+
+        if uri in standard_names:
+            return standard_names[uri]
+
+        # Custom project-specific link types — fetch the name
+        if uri.startswith('http'):
+            try:
+                resp = self.session.get(
+                    uri,
+                    headers={
+                        'Accept': 'application/rdf+xml',
+                        'OSLC-Core-Version': '2.0',
+                        'X-Requested-With': 'XMLHttpRequest',
+                    },
+                    timeout=15,
+                )
+                if resp.status_code == 200:
+                    root = ET.fromstring(resp.content)
+                    for elem in root.iter():
+                        local = elem.tag.split('}')[-1] if '}' in elem.tag else elem.tag
+                        if local == 'title' and elem.text:
+                            return elem.text
+            except Exception:
+                pass
+
+        return ''
+
     # ── Write: Requirements ───────────────────────────────────
 
     def get_artifact_shapes(self, project_url: str) -> List[Dict]:
@@ -746,7 +847,9 @@ class DOORSNextClient:
             return []
 
     def create_requirement(self, project_url: str, title: str, content: str,
-                           shape_url: str, folder_url: Optional[str] = None) -> Optional[Dict]:
+                           shape_url: str, folder_url: Optional[str] = None,
+                           link_uri: Optional[str] = None,
+                           link_target_url: Optional[str] = None) -> Optional[Dict]:
         """Create a requirement in DNG.
 
         Args:
@@ -755,6 +858,8 @@ class DOORSNextClient:
             content: Rich text content as plain text (converted to XHTML)
             shape_url: The artifact type shape URL (e.g., System Requirement)
             folder_url: Optional folder URL to place the artifact in
+            link_uri: Optional link type URI (e.g., a Satisfies link type URL)
+            link_target_url: Optional target requirement URL to link to
 
         Returns:
             Dict with 'title' and 'url' of created requirement, or None on failure.
@@ -778,17 +883,41 @@ class DOORSNextClient:
         if folder_url:
             folder_ref = f'<nav:parent rdf:resource="{folder_url}"/>'
 
+        # Build link reference if provided
+        link_ref = ''
+        extra_ns = ''
+        if link_uri and link_target_url:
+            # Determine if this is a standard OSLC link or a custom project link
+            if link_uri.startswith('http://open-services.net/ns/rm#'):
+                # Standard OSLC RM link — use as XML element directly
+                link_local = link_uri.split('#')[-1]
+                link_ref = f'<oslc_rm:{link_local} rdf:resource="{link_target_url}"/>'
+            elif link_uri.startswith('http://jazz.net/ns/dm/linktypes#'):
+                # Jazz DM link type
+                link_local = link_uri.split('#')[-1]
+                extra_ns = ' xmlns:dm="http://jazz.net/ns/dm/linktypes#"'
+                link_ref = f'<dm:{link_local} rdf:resource="{link_target_url}"/>'
+            else:
+                # Custom project-specific link type — use the full URI as namespace + local
+                # Extract the base URL and the LT_ identifier
+                if '/types/LT_' in link_uri:
+                    lt_id = link_uri.split('/')[-1]
+                    lt_base = link_uri.rsplit('/', 1)[0] + '/'
+                    extra_ns = f' xmlns:rm_link="{lt_base}"'
+                    link_ref = f'<rm_link:{lt_id} rdf:resource="{link_target_url}"/>'
+
         rdf = f'''<?xml version="1.0" encoding="UTF-8"?>
 <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
          xmlns:dcterms="http://purl.org/dc/terms/"
          xmlns:oslc_rm="http://open-services.net/ns/rm#"
          xmlns:oslc="http://open-services.net/ns/core#"
-         xmlns:nav="http://jazz.net/ns/rm/navigation#">
+         xmlns:nav="http://jazz.net/ns/rm/navigation#"{extra_ns}>
   <oslc_rm:Requirement>
     <dcterms:title>{self._escape_xml(prefixed_title)}</dcterms:title>
     <dcterms:description rdf:parseType="Literal">{xhtml_content}</dcterms:description>
     <oslc:instanceShape rdf:resource="{shape_url}"/>
     {folder_ref}
+    {link_ref}
   </oslc_rm:Requirement>
 </rdf:RDF>'''
 

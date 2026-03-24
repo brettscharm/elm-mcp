@@ -76,6 +76,8 @@ Ask these questions one at a time (not all at once). Wait for each answer before
 
 4. > "Is there anything specific that must be included? Any constraints, standards, or existing requirements I should be aware of?"
 
+5. > "Should these requirements link to any existing artifacts? For example, if these are system requirements that satisfy business requirements, I can create Satisfies or Elaborated By links. What link type should I use, or should I skip linking?"
+
 **Phase 2: Generate and preview in plain language**
 
 1. Call `get_artifact_types` for the project (to know what types are available)
