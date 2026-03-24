@@ -400,8 +400,8 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             client = DOORSNextClient(url, username, password)
             if not client.authenticate():
                 return [TextContent(type="text", text=(
-                    "Failed to connect to DOORS Next. Please check:\n"
-                    "- URL is correct and ends with /rm\n"
+                    "Failed to connect. Please check:\n"
+                    "- URL is correct (e.g., https://your-server.com)\n"
                     "- Username and password are correct\n"
                     "- The server is reachable from this machine"
                 ))]
@@ -581,6 +581,8 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                 lines.append(f"{i}. **{req['title']}**{type_tag}")
                 if req.get('id'):
                     lines.append(f"   - ID: `{req['id']}`")
+                if req.get('url'):
+                    lines.append(f"   - URL: `{req['url']}`")
                 if req.get('description'):
                     desc = req['description']
                     if len(desc) > 200:
@@ -814,6 +816,8 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
 
             for i, r in enumerate(created, 1):
                 lines.append(f"{i}. {r['title']}")
+                if r.get('url'):
+                    lines.append(f"   - URL: `{r['url']}`")
 
             if failed:
                 lines.append(f"\n**Failed ({len(failed)}):**")

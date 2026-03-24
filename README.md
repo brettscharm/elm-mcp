@@ -80,7 +80,7 @@ doors-next-bob-integration/
 | Problem | Fix |
 |---------|-----|
 | Bob can't see the MCP server | Restart VS Code after first setup |
-| Authentication fails | URL must end with `/rm` (e.g., `https://server.com/rm`) |
+| Authentication fails | Check username/password. The tool auto-appends `/rm` so either `https://server.com` or `https://server.com/rm` works. |
 | No modules found | Check your DNG permissions for that project |
 
 ---
