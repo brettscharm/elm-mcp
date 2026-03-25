@@ -181,14 +181,12 @@ This freezes the current state so you can compare against it later.
 
 **Baseline Comparison:**
 
-**Limitation:** The MCP tools cannot read requirements from a specific baseline — only from the current stream. For actual side-by-side comparison against a baseline, the user must use DNG's built-in Compare feature.
-
 When the user asks to compare baselines or see what changed:
 
-1. Call `list_baselines` with `project_identifier` to show available baselines
-2. Read the current requirements using `get_module_requirements`
-3. If the user just re-imported a PDF, reference the diff table you already showed them
-4. Otherwise, tell the user: "Open DNG and use the built-in Compare feature to diff the baseline against the current stream — it will show exactly which artifacts changed."
+1. Call `list_baselines` with `project_identifier` to show available baselines with their URLs
+2. User picks a baseline → call `compare_baselines` with `project_identifier`, `module_identifier`, and the `baseline_url`
+3. The tool reads requirements from both the baseline and current stream, then returns a structured diff showing: **modified**, **added**, **removed**, and **unchanged** requirements
+4. Present the results to the user
 
 ### Step 3d: CREATE TASKS Path (EWM)
 
@@ -325,6 +323,7 @@ Only proceed after the user explicitly confirms. If ALL requirements ARE Approve
 | `update_requirement` | Update an existing requirement's title/content | requirement_url, title (optional), content (optional) |
 | `create_baseline` | Create a baseline snapshot of a project | project_identifier, title, description (optional) |
 | `list_baselines` | List existing baselines for a project | project_identifier |
+| `compare_baselines` | Compare baseline vs current stream (shows diff) | project_identifier, module_identifier, baseline_url |
 | `extract_pdf` | Extract text from a PDF file (use before PDF import) | file_path |
 
 ### EWM (Work Items)

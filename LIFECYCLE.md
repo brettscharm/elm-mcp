@@ -198,6 +198,7 @@ Every artifact is:
 | PDF import / re-import (diff) | DNG | `extract_pdf` + `update_requirement` + `create_requirements` | ✅ |
 | Create baselines (snapshots) | DNG | `create_baseline` | ✅ |
 | List baselines | DNG | `list_baselines` | ✅ |
+| Compare baseline vs current | DNG | `compare_baselines` | ✅ |
 | Save to file (JSON/CSV/MD) | Local | `save_requirements` | ✅ |
 | Create Tasks | EWM | `create_task` | ✅ |
 | Cross-tool link: Task → Requirement | EWM | `create_task` | ✅ |

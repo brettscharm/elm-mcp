@@ -4,7 +4,7 @@ IBM ELM MCP Server for IBM Bob
 Provides tools for Bob to interact with IBM Engineering Lifecycle Management (ELM)
 Covers DNG (requirements), EWM (work items), and ETM (test management)
 
-Tools (15):
+Tools (16):
   1.  connect_to_elm          - Connect with credentials
   2.  list_projects           - List DNG/EWM/ETM projects (domain parameter)
   3.  get_modules             - Get modules from a DNG project
@@ -16,10 +16,11 @@ Tools (15):
   9.  update_requirement      - Update an existing requirement's title and/or content
   10. create_baseline         - Create a baseline snapshot of a DNG project
   11. list_baselines          - List existing baselines for a DNG project
-  12. extract_pdf             - Extract text from a PDF file for import into DNG
-  13. create_task             - Create an EWM Task with optional DNG requirement link
-  14. create_test_case        - Create an ETM Test Case with optional DNG requirement link
-  15. create_test_result      - Create an ETM Test Result (pass/fail) for a test case
+  12. compare_baselines       - Compare baseline vs current stream (shows diff)
+  13. extract_pdf             - Extract text from a PDF file for import into DNG
+  14. create_task             - Create an EWM Task with optional DNG requirement link
+  15. create_test_case        - Create an ETM Test Case with optional DNG requirement link
+  16. create_test_result      - Create an ETM Test Result (pass/fail) for a test case
 """
 
 import os
@@ -362,6 +363,33 @@ async def list_tools() -> list[Tool]:
             }
         ),
         Tool(
+            name="compare_baselines",
+            description=(
+                "Compare requirements between a baseline and the current stream. "
+                "Reads requirements from a baseline snapshot and the current state, "
+                "then returns what changed, was added, or was removed. "
+                "Call list_baselines first to get baseline URLs."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "project_identifier": {
+                        "type": "string",
+                        "description": "DNG project number or name"
+                    },
+                    "module_identifier": {
+                        "type": "string",
+                        "description": "Module number or name (from get_modules)"
+                    },
+                    "baseline_url": {
+                        "type": "string",
+                        "description": "URL of the baseline to compare against (from list_baselines output)"
+                    }
+                },
+                "required": ["project_identifier", "module_identifier", "baseline_url"]
+            }
+        ),
+        Tool(
             name="extract_pdf",
             description=(
                 "Extract text from a PDF file. "
@@ -526,6 +554,105 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                 f"- **Full Lifecycle** — Requirements → Tasks → Test Cases, all cross-linked.\n\n"
                 f"Which project would you like to work with?"
             ))]
+
+        # ── compare_baselines (DNG CM) ────────────────────────
+        elif name == "compare_baselines":
+            proj_id = arguments.get("project_identifier", "")
+            mod_id = arguments.get("module_identifier", "")
+            bl_url = arguments.get("baseline_url", "")
+
+            if not proj_id or not mod_id or not bl_url:
+                return [TextContent(type="text", text=(
+                    "Error: project_identifier, module_identifier, and baseline_url are all required."
+                ))]
+
+            if not _projects_cache:
+                _projects_cache = client.list_projects()
+
+            project = _find_by_identifier(_projects_cache, proj_id)
+            if not project:
+                return [TextContent(type="text", text=f"Project not found: '{proj_id}'")]
+
+            project_key = project['id']
+            if project_key not in _modules_cache:
+                modules = client.get_modules(project['url'])
+                _modules_cache[project_key] = modules
+
+            modules = _modules_cache.get(project_key, [])
+            module = _find_by_identifier(modules, mod_id)
+            if not module:
+                return [TextContent(type="text", text=f"Module not found: '{mod_id}'")]
+
+            # Read current requirements
+            current_reqs = client.get_module_requirements(module['url'])
+            # Read baseline requirements
+            baseline_reqs = client.get_module_requirements(module['url'], config_url=bl_url)
+
+            # Build lookup maps by title for diffing
+            current_map = {r.get('title', ''): r for r in current_reqs}
+            baseline_map = {r.get('title', ''): r for r in baseline_reqs}
+
+            all_titles = set(list(current_map.keys()) + list(baseline_map.keys()))
+
+            added = []
+            removed = []
+            changed = []
+            unchanged = []
+
+            for title in sorted(all_titles):
+                in_current = title in current_map
+                in_baseline = title in baseline_map
+
+                if in_current and not in_baseline:
+                    added.append(current_map[title])
+                elif in_baseline and not in_current:
+                    removed.append(baseline_map[title])
+                elif in_current and in_baseline:
+                    cur = current_map[title]
+                    bl = baseline_map[title]
+                    # Compare descriptions
+                    cur_desc = (cur.get('description') or '').strip()
+                    bl_desc = (bl.get('description') or '').strip()
+                    if cur_desc != bl_desc:
+                        changed.append({'title': title, 'baseline': bl_desc, 'current': cur_desc})
+                    else:
+                        unchanged.append(title)
+
+            lines = [
+                f"# Baseline Comparison: '{module['title']}'\n",
+                f"**Baseline:** `{bl_url}`\n",
+                f"**Current stream** vs **baseline**:\n",
+            ]
+
+            if not added and not removed and not changed:
+                lines.append("**No changes detected.** The current stream matches the baseline.")
+            else:
+                if changed:
+                    lines.append(f"### Modified ({len(changed)})\n")
+                    for c in changed:
+                        lines.append(f"- **{c['title']}**")
+                        bl_preview = c['baseline'][:100] + '...' if len(c['baseline']) > 100 else c['baseline']
+                        cur_preview = c['current'][:100] + '...' if len(c['current']) > 100 else c['current']
+                        lines.append(f"  - Baseline: {bl_preview}")
+                        lines.append(f"  - Current: {cur_preview}")
+
+                if added:
+                    lines.append(f"\n### Added ({len(added)})\n")
+                    for a in added:
+                        lines.append(f"- **{a.get('title', 'Untitled')}**")
+
+                if removed:
+                    lines.append(f"\n### Removed ({len(removed)})\n")
+                    for r in removed:
+                        lines.append(f"- **{r.get('title', 'Untitled')}**")
+
+                if unchanged:
+                    lines.append(f"\n### Unchanged ({len(unchanged)})\n")
+                    lines.append(f"_{len(unchanged)} requirement(s) identical to baseline._")
+
+            lines.append(f"\n**Summary:** {len(changed)} modified, {len(added)} added, {len(removed)} removed, {len(unchanged)} unchanged")
+
+            return [TextContent(type="text", text="\n".join(lines))]
 
         # ── extract_pdf (no connection needed) ────────────────
         if name == "extract_pdf":

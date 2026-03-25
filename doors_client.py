@@ -386,24 +386,35 @@ class DOORSNextClient:
 
     # ── Requirements ──────────────────────────────────────────
 
-    def get_module_requirements(self, module_url: str) -> List[Dict]:
+    def get_module_requirements(self, module_url: str, config_url: Optional[str] = None) -> List[Dict]:
         """Get requirements from a specific module by its URL.
 
         Uses the Reportable REST API (publish/resources?moduleURI=...).
         Falls back to OSLC parsing if Reportable namespaces don't match.
+
+        Args:
+            module_url: The module's URL
+            config_url: Optional configuration context URL (baseline or stream).
+                        If provided, reads requirements from that specific configuration.
         """
         self._ensure_auth()
+
+        extra_headers = {}
+        if config_url:
+            extra_headers['Configuration-Context'] = config_url
 
         # Try both parameter names (varies by DNG version)
         for param_name in ['moduleURI', 'moduleURL']:
             try:
+                headers = {
+                    'Accept': 'application/xml',
+                    'X-Requested-With': 'XMLHttpRequest',
+                }
+                headers.update(extra_headers)
                 resp = self.session.get(
                     f"{self.base_url}/publish/resources",
                     params={param_name: module_url},
-                    headers={
-                        'Accept': 'application/xml',
-                        'X-Requested-With': 'XMLHttpRequest',
-                    },
+                    headers=headers,
                     timeout=120,  # Requirements can be large, give extra time
                 )
                 if resp.status_code != 200:
