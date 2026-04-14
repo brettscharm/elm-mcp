@@ -43,35 +43,26 @@ class DOORSNextClient:
     }
 
     def __init__(self, base_url: str, username: str, password: str, verify_ssl: bool = True):
-        self.base_url = base_url.rstrip('/')
+        # Normalize: strip trailing slash, extract server root
+        base_url = base_url.rstrip('/')
+        server_root = base_url
+        for suffix in ['/rm', '/ccm', '/qm', '/gc']:
+            if base_url.endswith(suffix):
+                server_root = base_url[:-len(suffix)]
+                break
+
+        # Set up all endpoints explicitly
+        self.server_root = server_root
+        self.base_url = f"{server_root}/rm"     # DNG
+        self.ccm_url = f"{server_root}/ccm"     # EWM
+        self.qm_url = f"{server_root}/qm"       # ETM
+        self.gc_url = f"{server_root}/gc"        # GCM
+
         self.username = username
         self.password = password
         self.session = requests.Session()
         self.session.verify = verify_ssl
         self._authenticated = False
-
-    @property
-    def _server_root(self) -> str:
-        """Server root URL (without /rm, /ccm, or /qm context root)"""
-        for suffix in ['/rm', '/ccm', '/qm']:
-            if self.base_url.endswith(suffix):
-                return self.base_url[:-len(suffix)]
-        return self.base_url
-
-    @property
-    def _gc_url(self) -> str:
-        """GCM (Global Configuration) base URL"""
-        return f"{self._server_root}/gc"
-
-    @property
-    def _ccm_url(self) -> str:
-        """EWM (CCM) base URL"""
-        return f"{self._server_root}/ccm"
-
-    @property
-    def _qm_url(self) -> str:
-        """ETM (QM) base URL"""
-        return f"{self._server_root}/qm"
 
     @classmethod
     def from_env(cls):
@@ -201,7 +192,7 @@ class DOORSNextClient:
         # Clear basic auth — form auth uses cookies
         self.session.auth = None
 
-        auth_url = f"{self._server_root}/j_security_check"
+        auth_url = f"{self.server_root}/j_security_check"
         try:
             resp = self.session.post(
                 auth_url,
@@ -1749,7 +1740,7 @@ class DOORSNextClient:
         self._ensure_auth()
         try:
             resp = self.session.get(
-                f"{self._ccm_url}/oslc/workitems/catalog",
+                f"{self.ccm_url}/oslc/workitems/catalog",
                 headers={
                     'Accept': 'application/rdf+xml',
                     'OSLC-Core-Version': '2.0',
@@ -1894,7 +1885,7 @@ class DOORSNextClient:
         self._ensure_auth()
         try:
             resp = self.session.get(
-                f"{self._qm_url}/oslc_qm/catalog",
+                f"{self.qm_url}/oslc_qm/catalog",
                 headers={
                     'Accept': 'application/rdf+xml',
                     'OSLC-Core-Version': '2.0',
@@ -2099,7 +2090,7 @@ class DOORSNextClient:
         self._ensure_auth()
         try:
             resp = self.session.get(
-                f"{self._gc_url}/configuration",
+                f"{self.gc_url}/configuration",
                 headers={
                     'Accept': 'application/rdf+xml',
                     'OSLC-Core-Version': '2.0',
@@ -2141,7 +2132,7 @@ class DOORSNextClient:
         self._ensure_auth()
         try:
             resp = self.session.get(
-                f"{self._gc_url}/oslc-query/components",
+                f"{self.gc_url}/oslc-query/components",
                 headers={
                     'Accept': 'application/rdf+xml',
                     'OSLC-Core-Version': '2.0',

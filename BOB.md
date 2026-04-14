@@ -165,7 +165,6 @@ When generating requirements, follow these rules from IEEE 29148 and INCOSE best
 
    > Here are the **X requirements** I'd create in [project name]:
    >
-   > **Module:** [AI Generated] AI Generated - brett.scharmett - Security Requirements
    > **Folder:** AI Generated - brett.scharmett - Security Requirements
    >
    > | # | Type | Title | Acceptance Criteria |
@@ -183,7 +182,7 @@ When generating requirements, follow these rules from IEEE 29148 and INCOSE best
 **Phase 3: Confirm delivery**
 
 Tell the user:
-> "Done! I created X requirements in the '[folder name]' folder in [project name]. Open DNG to review them — move the ones you approve into the appropriate module."
+> "Done! I created X requirements in the '[folder name]' folder in [project name]. Open DNG to review them. To organize them, create a module in DNG and add these requirements to it."
 
 Note: The `[AI Generated]` prefix and `[AI Generated]` content tag are added automatically by the tool — you do NOT need to add them to titles or content.
 
@@ -377,7 +376,8 @@ Only proceed after the user explicitly confirms. If ALL requirements ARE Approve
 - The only tool that modifies existing artifacts is `update_requirement` — and it REQUIRES showing the diff and getting approval first
 - **NEVER** touch Approved requirements unless the user explicitly confirms
 - **ALWAYS** show the user what will be created or changed and get explicit confirmation before writing
-- The human is responsible for moving artifacts into modules, assigning work items, and setting approval status
+- The human is responsible for creating modules, adding requirements to modules, assigning work items, and setting approval status
+- **Module creation is a manual step** — the OSLC API does not support adding requirements into modules programmatically. The AI creates requirements in folders; the user creates modules and adds requirements to them in the DNG web UI.
 - If deriving work from non-approved requirements, the generated artifacts must include a note:
   > "[AI Generated] Note: Generated from requirements that were not yet Approved at time of creation."
 
