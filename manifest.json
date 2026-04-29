@@ -1,0 +1,71 @@
+{
+  "manifest_version": "0.3",
+  "name": "elm-mcp",
+  "display_name": "ELM MCP",
+  "version": "0.1.0",
+  "description": "MCP server for IBM Engineering Lifecycle Management (ELM) — DOORS Next, EWM, ETM, GCM, and SCM/code-review — driven by AI assistants like Claude, IBM Bob, Cursor, and VS Code.",
+  "long_description": "Talk to IBM ELM from any MCP-speaking AI assistant. Read and write requirements (with rich text, tables, images), create modules with auto-bound requirements, transition work items through their workflow, query work items with OSLC filters, create defects, link any two artifacts, inspect change-sets and code reviews, and chart your ELM data. 35 tools covering the full requirements-to-test lifecycle. Personal passion project — not an official IBM product. Use at your own risk.",
+  "author": {
+    "name": "Brett Scharmett",
+    "email": "brett.scharmett@ibm.com",
+    "url": "https://github.com/brettscharm"
+  },
+  "homepage": "https://github.com/brettscharm/elm-mcp",
+  "documentation": "https://github.com/brettscharm/elm-mcp#readme",
+  "support": "https://github.com/brettscharm/elm-mcp/issues",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/brettscharm/elm-mcp"
+  },
+  "license": "MIT",
+  "keywords": [
+    "ibm",
+    "elm",
+    "doors-next",
+    "dng",
+    "ewm",
+    "etm",
+    "oslc",
+    "requirements",
+    "alm",
+    "engineering-lifecycle"
+  ],
+  "server": {
+    "type": "python",
+    "entry_point": "doors_mcp_server.py",
+    "mcp_config": {
+      "command": "python3",
+      "args": ["${__dirname}/doors_mcp_server.py"],
+      "env": {
+        "ELM_URL": "${user_config.elm_url}",
+        "ELM_USERNAME": "${user_config.elm_username}",
+        "ELM_PASSWORD": "${user_config.elm_password}"
+      }
+    }
+  },
+  "user_config": {
+    "elm_url": {
+      "type": "string",
+      "title": "ELM Server URL",
+      "description": "Base URL of your IBM ELM server, e.g. https://yourcompany.elm.ibmcloud.com (the path /rm /ccm /qm is added automatically — paste the bare server URL).",
+      "required": true
+    },
+    "elm_username": {
+      "type": "string",
+      "title": "ELM Username",
+      "description": "Your ELM login username. The same credentials cover DNG, EWM, ETM, GCM, and SCM.",
+      "required": true
+    },
+    "elm_password": {
+      "type": "string",
+      "title": "ELM Password",
+      "description": "Your ELM password. Stored locally only — never transmitted to Smithery or any third party.",
+      "sensitive": true,
+      "required": true
+    }
+  },
+  "compatibility": {
+    "platforms": ["darwin", "linux", "win32"],
+    "python": ">=3.9"
+  }
+}

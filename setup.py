@@ -256,6 +256,19 @@ def host_present_windsurf(home: Path) -> bool:
     )
 
 
+def host_present_bob(home: Path) -> bool:
+    """IBM Bob detection: ~/.bob exists (Bob creates it on first run), the
+    Bob app bundle, or `bob` on PATH. Bob is also commonly run as a VS Code
+    extension — in that case ~/.bob may exist alongside VS Code; we still
+    write Bob's own .bob configs in addition to VS Code's mcp.json."""
+    return (
+        (home / ".bob").exists()
+        or Path("/Applications/Bob.app").exists()
+        or shutil.which("bob") is not None
+        or shutil.which("bob-shell") is not None
+    )
+
+
 def write_claude_code(py_exe: str, home: Path) -> list[tuple[str, str, Path]]:
     """Claude Code stores MCP servers in TWO documented places:
 
@@ -335,6 +348,66 @@ def write_cursor(py_exe: str, home: Path) -> list[tuple[str, str, Path]]:
     return results
 
 
+# Read-only tools that are safe to auto-approve in Bob — Bob's `alwaysAllow`
+# array suppresses the per-call permission prompt for these. Writes still
+# require explicit user confirmation because they hit the live ELM server.
+_BOB_ALWAYS_ALLOW = [
+    "connect_to_elm",
+    "list_projects",
+    "get_modules",
+    "get_module_requirements",
+    "save_requirements",
+    "search_requirements",
+    "get_artifact_types",
+    "get_link_types",
+    "get_attribute_definitions",
+    "list_baselines",
+    "compare_baselines",
+    "extract_pdf",
+    "list_global_configurations",
+    "list_global_components",
+    "get_global_config_details",
+    "query_work_items",
+    "scm_list_projects",
+    "scm_list_changesets",
+    "scm_get_changeset",
+    "scm_get_workitem_changesets",
+    "review_get",
+    "review_list_open",
+    "generate_chart",
+]
+
+
+def write_bob(py_exe: str, home: Path) -> list[tuple[str, str, Path]]:
+    """IBM Bob reads two MCP configs (global + project), both with the
+    standard mcpServers top-level key. Bob's per-server schema also accepts
+    `alwaysAllow` (array of tool names to skip the per-call permission
+    prompt) and `disabled`. We pre-populate alwaysAllow with the read-only
+    tools so a Bob session feels snappy on common queries; writes still
+    prompt for confirmation.
+
+    Schema URL: https://bob.ibm.com/docs/ide/configuration/mcp/mcp-in-bob
+    """
+    entry = make_server_entry(py_exe, with_cwd=False, include_type=False)
+    entry["alwaysAllow"] = list(_BOB_ALWAYS_ALLOW)
+    results = []
+    # Global Bob config
+    global_path = home / ".bob" / "mcp_settings.json"
+    results.append((
+        "Bob (~/.bob/mcp_settings.json, global)",
+        merge_into(global_path, "mcpServers", "doors-next", entry),
+        global_path,
+    ))
+    # Project-scoped Bob config (lives next to the cloned repo)
+    project_path = HERE / ".bob" / "mcp.json"
+    results.append((
+        "Bob (<project>/.bob/mcp.json, project)",
+        merge_into(project_path, "mcpServers", "doors-next", entry),
+        project_path,
+    ))
+    return results
+
+
 def write_windsurf(py_exe: str, home: Path) -> list[tuple[str, str, Path]]:
     """Windsurf reads ~/.codeium/windsurf/mcp_config.json. Top-level key is
     "mcpServers". Supports command/args/env. cwd is supported in practice
@@ -357,7 +430,9 @@ def configure_hosts(py_exe: str) -> int:
     plan: list[tuple[str, callable, callable]] = [
         ("Claude Code", lambda: host_present_claude_code(home),
          lambda: write_claude_code(py_exe, home)),
-        ("VS Code (Copilot/Bob)", lambda: host_present_vscode(home),
+        ("IBM Bob", lambda: host_present_bob(home),
+         lambda: write_bob(py_exe, home)),
+        ("VS Code (Copilot)", lambda: host_present_vscode(home),
          lambda: write_vscode(py_exe)),
         ("Cursor", lambda: host_present_cursor(home),
          lambda: write_cursor(py_exe, home)),

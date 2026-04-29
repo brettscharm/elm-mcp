@@ -70,7 +70,62 @@ from doors_client import DOORSNextClient
 
 load_dotenv()
 
+# Bumped on each release. Used by the GitHub-release update check below
+# and surfaced in the connect_to_elm response so users know which version
+# they're running.
+__version__ = "0.1.0"
+GITHUB_REPO = "brettscharm/elm-mcp"
+
 app = Server("doors-next-server")
+
+# Update-check state — populated lazily on first tool call so we don't
+# block server startup on a network call. None means "not checked yet";
+# empty string means "checked, no update available"; non-empty means
+# "checked, here's the notice to surface to the user once".
+_update_notice: Optional[str] = None
+_update_notice_shown: bool = False
+
+
+def _check_for_update() -> str:
+    """Hit the GitHub releases API and return a one-line update notice
+    if a newer version is available. Empty string otherwise. Fails silent
+    on any error so an offline user is never blocked."""
+    global _update_notice
+    if _update_notice is not None:
+        return _update_notice
+    _update_notice = ""  # default: no notice
+    try:
+        import urllib.request, json as _json
+        req = urllib.request.Request(
+            f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest",
+            headers={"Accept": "application/vnd.github+json",
+                     "User-Agent": f"elm-mcp/{__version__}"},
+        )
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            data = _json.loads(resp.read().decode("utf-8"))
+        latest = (data.get("tag_name") or "").lstrip("v")
+        if latest and latest != __version__:
+            _update_notice = (
+                f"\n\n> ELM MCP v{latest} is available (you're on v{__version__}). "
+                f"Update with `smithery update elm-mcp` or `git pull` in your clone."
+            )
+    except Exception:
+        # Offline / rate-limited / repo not yet released — just stay quiet.
+        pass
+    return _update_notice
+
+
+def _maybe_append_update_notice(text: str) -> str:
+    """Append the update notice exactly once per session, on the first
+    tool that calls this. Avoids spamming every response."""
+    global _update_notice_shown
+    if _update_notice_shown:
+        return text
+    notice = _check_for_update()
+    if notice:
+        _update_notice_shown = True
+        return text + notice
+    return text
 
 # ── Session State ─────────────────────────────────────────────
 _client: Optional[DOORSNextClient] = None
@@ -1413,20 +1468,26 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             projects = _client.list_projects()
             _projects_cache = projects
 
-            return [TextContent(type="text", text=(
-                f"Successfully connected to IBM ELM!\n\n"
+            body = (
+                f"Successfully connected to IBM ELM (ELM MCP v{__version__}).\n\n"
                 f"**Endpoints configured:**\n"
                 f"- DNG (requirements): `{client.base_url}`\n"
-                f"- EWM (work items): `{client.ccm_url}`\n"
+                f"- EWM (work items / SCM): `{client.ccm_url}`\n"
                 f"- ETM (test mgmt): `{client.qm_url}`\n\n"
                 f"Found **{len(projects)}** DNG projects.\n\n"
                 f"**What I can do:**\n"
-                f"- **DNG** — Read, create, and update requirements. Import PDFs. Create baselines.\n"
-                f"- **EWM** — Create Tasks linked to requirements.\n"
+                f"- **DNG** — Read, create, and update requirements. Create modules and "
+                f"automatically populate them with requirements (no manual drag-bind needed). "
+                f"Import PDFs. Create and compare baselines.\n"
+                f"- **EWM** — Create Tasks and Defects, transition workflow states, "
+                f"query work items, update arbitrary fields.\n"
                 f"- **ETM** — Create Test Cases and record Test Results (pass/fail).\n"
-                f"- **Full Lifecycle** — Requirements → Tasks → Test Cases, all cross-linked.\n\n"
+                f"- **SCM** — Inspect change-sets and code reviews linked to work items.\n"
+                f"- **Full Lifecycle** — Requirements → Tasks → Test Cases → Defects, "
+                f"all cross-linked.\n\n"
                 f"Which project would you like to work with?"
-            ))]
+            )
+            return [TextContent(type="text", text=_maybe_append_update_notice(body))]
 
         # ── extract_pdf (no connection needed) ────────────────
         if name == "extract_pdf":

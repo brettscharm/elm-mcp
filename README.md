@@ -32,18 +32,30 @@ The MCP server itself does **zero AI generation** — every tool is a determinis
 
 You need: Python 3.9+, an ELM account, and one of: Claude Code, VS Code (with Copilot/Bob), Cursor, or Windsurf.
 
-```bash
-# 1. Get the code
-git clone https://github.com/brettscharm/doors-next-ai-agent.git
-cd doors-next-ai-agent
+### Option A — Smithery (one-line install for IBM Bob, Claude Code, Cursor, etc.)
 
-# 2. Run setup. Installs deps, writes MCP config for every AI host it
-#    detects, prompts for ELM credentials, and ACTUALLY LAUNCHES the MCP
-#    server in a subprocess to verify the handshake + tool registration
-#    end-to-end. No false-positive "looks fine" outcomes.
+```bash
+# Once Smithery CLI is installed
+npm install -g @smithery/cli       # one-time
+smithery install brettscharm/elm-mcp
+```
+
+Smithery clones, configures, and registers the MCP with whatever AI host you have. You'll be prompted for `ELM_URL`, `ELM_USERNAME`, `ELM_PASSWORD`. Updates: `smithery update elm-mcp`.
+
+### Option B — Manual clone + setup.py
+
+```bash
+# 1. Get the code (one-time — never re-clone, just `git pull` to update)
+git clone https://github.com/brettscharm/elm-mcp.git
+cd elm-mcp
+
+# 2. Run setup. Installs deps, writes MCP config for every AI host
+#    detected (Claude Code, IBM Bob, VS Code, Cursor, Windsurf), prompts
+#    for ELM credentials, and ACTUALLY LAUNCHES the MCP server in a
+#    subprocess to verify the handshake + tool registration end-to-end.
 python3 setup.py
 
-# 3. Open your AI assistant and say:
+# 3. Restart your AI assistant and say:
 #    "Connect to ELM and list my projects"
 ```
 
@@ -73,11 +85,12 @@ This repo is the **hands**, not the brain. Same server works against any MCP-spe
 | AI Assistant | Config file `setup.py` writes | Doc reference |
 |---|---|---|
 | **Claude Code** | `~/.claude.json` (user) + `.mcp.json` (project) | https://code.claude.com/docs/en/mcp |
-| **VS Code** (Copilot / Bob) | `.vscode/mcp.json` (workspace) | https://code.visualstudio.com/docs/copilot/customization/mcp-servers |
+| **IBM Bob** | `~/.bob/mcp_settings.json` (user) + `.bob/mcp.json` (project) | https://bob.ibm.com/docs/ide/configuration/mcp/mcp-in-bob |
+| **VS Code** (Copilot) | `.vscode/mcp.json` (workspace) | https://code.visualstudio.com/docs/copilot/customization/mcp-servers |
 | **Cursor** | `.cursor/mcp.json` (workspace) + `~/.cursor/mcp.json` (user) | https://cursor.com/docs/context/mcp |
 | **Windsurf** | `~/.codeium/windsurf/mcp_config.json` | https://docs.windsurf.com/windsurf/cascade/mcp |
 
-`setup.py` writes to every host it detects in one run.
+`setup.py` writes to every host it detects in one run. **For Bob specifically:** the read-only tools (list, get, query, search, etc.) are pre-approved via `alwaysAllow`, so Bob runs them without per-call permission prompts. Writes (create, update, transition, link) still ask for confirmation.
 
 ---
 
@@ -187,7 +200,7 @@ These are **server-side restrictions**, not bugs in this MCP:
 ## Project structure
 
 ```
-doors-next-ai-agent/
+elm-mcp/
 ├── setup.py               # One-command installer + --diagnose flag
 ├── doors_mcp_server.py    # MCP server (35 tools, 4 prompts, 3 resources)
 ├── doors_client.py        # ELM REST client (DNG + EWM + ETM + GCM + SCM)
@@ -209,7 +222,7 @@ doors-next-ai-agent/
 
 ## Contributing / Issues
 
-- GitHub issues: https://github.com/brettscharm/doors-next-ai-agent/issues
+- GitHub issues: https://github.com/brettscharm/elm-mcp/issues
 - Email: brett.scharmett@ibm.com  *(personal capacity — not IBM support)*
 
 PRs welcome. The probes in `probe/` document everything we've learned about the live ELM API surface; new tools should follow the patterns in `doors_client.py` (GET-with-ETag → modify → PUT-with-If-Match for updates; service-provider-discovery → POST to creation factory for creates) and add a one-line live-test entry to `probe/A_C_LIVE_TESTS.txt` if exercising new endpoints.

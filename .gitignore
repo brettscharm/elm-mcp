@@ -60,6 +60,7 @@ charts/
 # Per-machine MCP configs (setup.py writes absolute paths into them)
 .mcp.json
 .cursor/
+.bob/
 .codeium/
 
 # Probe directory — keep .md reports + .py scripts as reference,
