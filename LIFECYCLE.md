@@ -59,12 +59,15 @@ The human stays in control at every gate. ELM provides the audit trail.
 - Cross-tool links: EWM Task → DNG requirement (calm:implementsRequirement)
 
 **Status:**
-- ✅ EWM project discovery works (101 projects found)
+- ✅ EWM project discovery works (105 projects found)
 - ✅ EWM creation factory discovery (Task, Defect, Story factories)
-- ✅ Task creation via MCP tool — tested against live server (201 Created)
-- ✅ Cross-tool link: Task → DNG Requirement (calm:implementsRequirement)
+- ✅ Task creation via MCP tool — tested against live server
+- ✅ **Defect creation via `create_defect`** — Filed Against issue resolved by reading `oslc:allowedValues` and picking a non-default category (live-tested)
+- ✅ Cross-tool link: Task → DNG Requirement (`calm:implementsRequirement`)
+- ✅ **Work item updates via `update_work_item`** — arbitrary fields PUT-with-If-Match
+- ✅ **Workflow state transitions via `transition_work_item`** — uses `?_action=` (direct state PUT is silently rejected by EWM)
+- ✅ **Work item queries via `query_work_items`** — OSLC CM with `oslc.where` filter
 - ✅ OSLC error messages surfaced to user (permissions, etc.)
-- 🔧 Story/Defect creation skipped for now (Filed Against namespace issue)
 
 ---
 
@@ -88,12 +91,11 @@ The human stays in control at every gate. ELM provides the audit trail.
 - Cross-tool links: ETM test case → DNG requirement
 
 **Status:**
-- ✅ ETM project discovery works (77 projects found)
-- ✅ Test Case creation works
-- ✅ Test Script creation works
-- ✅ Test Execution Record creation works
-- ✅ Test Result creation with pass/fail works
-- ✅ Cross-tool link: Test Case → DNG Requirement (oslc_qm:validatesRequirement)
+- ✅ ETM project discovery works (81 projects found)
+- ✅ Test Case creation works (`create_test_case`)
+- ✅ Test Result creation with pass/fail works (`create_test_result`)
+- ✅ Cross-tool link: Test Case → DNG Requirement (`oslc_qm:validatesRequirement`)
+- 🔜 Test Script, Test Plan, Test Suite, Test Execution Record creation — factories visible in services.xml but no tools yet (tracked in `probe/OSLC_GAPS.md` Section 3)
 
 ---
 
@@ -113,7 +115,7 @@ The human stays in control at every gate. ELM provides the audit trail.
 - Work item status changes tracked in EWM
 - Git commits linked to work items (if EWM-Git integration configured)
 
-**Status:** 🔜 Bob already writes code natively — need EWM status update API
+**Status:** ✅ The EWM update + transition tools (`update_work_item`, `transition_work_item`) are now implemented. Code-writing happens in the user's IDE with their AI; this MCP just exposes the EWM-side state changes.
 
 ---
 
@@ -206,10 +208,24 @@ Every artifact is:
 | Create Test Cases | ETM | `create_test_case` | ✅ |
 | Cross-tool link: Test Case → Requirement | ETM | `create_test_case` | ✅ |
 | Create Test Results (pass/fail) | ETM | `create_test_result` | ✅ |
-| Create Stories/Defects | EWM | — | 🔧 Skipped |
+| Create Defects | EWM | `create_defect` | ✅ |
+| Update arbitrary work item fields | EWM | `update_work_item` | ✅ |
+| Transition work item state | EWM | `transition_work_item` | ✅ |
+| Query work items with `oslc.where` | EWM | `query_work_items` | ✅ |
+| Update arbitrary DNG attributes (Status, Priority, etc.) | DNG | `update_requirement_attributes` + `get_attribute_definitions` | ✅ |
+| Create cross-artifact links between any two artifacts | Cross | `create_link` | ✅ |
+| Create modules | DNG | `create_module` | ✅ (artifact only — see Module-binding limit) |
+| Add requirements to a module's structure | DNG | — | ❌ DNG locks `oslc_rm:uses` writes (see `probe/MODULE_BINDING_FINDINGS.md`); ReqIF would be the path |
+| List SCM projects | EWM SCM | `scm_list_projects` | ✅ |
+| List change sets | EWM SCM | `scm_list_changesets` | ✅ |
+| Get a change set | EWM SCM | `scm_get_changeset` | ✅ |
+| Get change sets for a work item | EWM SCM | `scm_get_workitem_changesets` | ✅ |
+| Get a code review record | EWM SCM | `review_get` | ✅ |
+| List open code reviews | EWM SCM | `review_list_open` | ✅ |
 | List global configurations | GCM | `list_global_configurations` | ✅ |
 | List global components | GCM | `list_global_components` | ✅ |
 | Get global config details | GCM | `get_global_config_details` | ✅ |
+| Generate charts | Local | `generate_chart` | ✅ |
 
 ---
 

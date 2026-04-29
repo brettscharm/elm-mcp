@@ -1,118 +1,168 @@
-# DOORS Next AI Agent
+# ELM MCP
 
-An MCP server that lets AI coding assistants (Claude, Bob, Copilot, Cursor, etc.) read and write engineering artifacts across the IBM Engineering Lifecycle Management (ELM) suite — DOORS Next (DNG), Engineering Workflow Management (EWM), and Engineering Test Management (ETM).
+**An MCP server that lets AI assistants drive IBM Engineering Lifecycle Management (ELM) — DOORS Next, EWM, ETM, GCM, and SCM/code-review — through standard OSLC and Reportable REST APIs.**
 
-**20 MCP tools + 4 prompts + 3 resource templates** covering the full requirements-to-test lifecycle with read+write capabilities across DNG, EWM, and ETM.
-
-**This is NOT an official IBM product.** Built by Brett Scharmett for demo purposes.
+> ## ⚠️ This is a personal passion project. NOT created, endorsed, supported, or distributed by IBM or the ELM development team.
+>
+> **Use entirely at your own risk.** Built by Brett Scharmett on personal time for community / demo use.
+> No warranty. No SLAs. No IBM backing. Things can and will break — file issues, send PRs, or just don't use it.
+>
+> *IBM, DOORS Next, ELM, EWM, ETM, Engineering Workflow Management, Engineering Test Management, and Jazz are trademarks of International Business Machines Corp. This project is independently developed against IBM's public OSLC / Reportable REST APIs.*
 
 ---
 
-## Setup
+## What it does
+
+**35 MCP tools, 4 workflow prompts, 3 resource templates** — read and write across the full ELM stack from any MCP-speaking AI assistant (Claude Code, VS Code Bob/Copilot, Cursor, Windsurf, custom agents).
+
+| Domain | Read | Write | Query / Workflow |
+|---|---|---|---|
+| **DNG** (Requirements) | List projects, modules, requirements, artifact types, link types, attribute definitions, baselines | Create requirements (with rich Markdown / XHTML / tables / images), create modules, create folders, update title/content, **update arbitrary attributes** (Status, Priority, etc.), create baselines | Search, compare baselines, **create links** between any two existing artifacts |
+| **EWM** (Work Items) | List projects | Create Tasks, **create Defects** (with Filed Against resolution) | **Update work items**, **transition workflow states** (New → In Progress → Resolved → Closed), **query work items** with `oslc.where` filters |
+| **ETM** (Test) | List projects | Create test cases, create test results | — |
+| **GCM** (Global Config) | List configs, list components, get config details | — | — |
+| **SCM** (Code) | List SCM projects, list change sets, get change set + linked work items, get code review record | — | Reverse-lookup: get change sets for a work item |
+| **Other** | Extract PDF (for re-import), generate charts (PNG) | — | — |
+
+The MCP server itself does **zero AI generation** — every tool is a deterministic API call against ELM. The intelligence (writing requirements, parsing PDFs, picking chart types, choosing tools) comes from whichever AI assistant you connect.
+
+---
+
+## Quick Start (≈ 2 minutes)
+
+You need: Python 3.9+, an ELM account, and one of: Claude Code, VS Code (with Copilot/Bob), Cursor, or Windsurf.
 
 ```bash
+# 1. Get the code
 git clone https://github.com/brettscharm/doors-next-ai-agent.git
+cd doors-next-ai-agent
+
+# 2. Run setup. Installs deps, writes MCP config for every AI host it
+#    detects, prompts for ELM credentials, and ACTUALLY LAUNCHES the MCP
+#    server in a subprocess to verify the handshake + tool registration
+#    end-to-end. No false-positive "looks fine" outcomes.
+python3 setup.py
+
+# 3. Open your AI assistant and say:
+#    "Connect to ELM and list my projects"
 ```
 
-Open the project in your IDE (VS Code, Cursor, Windsurf, etc.) with an AI assistant, then say:
+`setup.py` is idempotent — re-run it any time (after switching AI tools, rotating your password, upgrading Python, etc.). It exits non-zero on any real failure so it's safe to wire into CI.
 
-```
-Connect to ELM
-```
+**After first setup, restart your AI assistant** so it picks up the new MCP entry. Claude Code reads `~/.claude.json` and the project-local `.mcp.json` on each session start.
 
-The AI handles everything from there — installs dependencies, configures the MCP server, asks for your credentials, and connects.
-
-**First-time only:** You may need to reload your IDE window after the MCP server is configured. Claude Code hot-reloads automatically — no restart needed.
-
----
-
-## What It Does
-
-**Read (DNG):**
-1. **Connect** — asks for your ELM server URL, username, and password (or reads from `.env`)
-2. **Projects** — List all DNG, EWM, or ETM projects
-3. **Modules** — Browse modules from any project
-4. **Requirements** — Read requirements with full attributes, custom fields, and artifact types
-5. **Search** — Full-text search across all artifacts in a project (OSLC query)
-6. **Link Types** — Discover all link types (Satisfies, Elaborated By, etc.)
-7. **Save** — Export to JSON, CSV, or Markdown
-
-**Write (DNG):**
-8. **Create** — Generate IEEE 29148-compliant requirements with measurable acceptance criteria
-9. **Organize** — Create modules and folders for AI-generated artifacts
-10. **Update** — Modify existing requirements (with ETag optimistic locking)
-11. **Baselines** — Create, list, and compare baseline snapshots
-
-**Full Lifecycle (DNG + EWM + ETM):**
-- Create requirements in DNG with acceptance criteria
-- Create Tasks in EWM linked to requirements (with verification methods)
-- Create Test Cases in ETM linked to requirements (with preconditions, steps, pass/fail criteria)
-- Record Test Results (pass/fail/blocked/incomplete/error)
-- All artifacts cross-linked for full traceability
-
-**MCP Prompts (workflow templates):**
-- `/generate-requirements` — Structured requirements generation with standards compliance
-- `/full-lifecycle` — Requirements → Tasks → Test Cases, all cross-linked
-- `/import-pdf` — Parse a PDF into requirements and push to DNG
-- `/review-requirements` — Quality review against IEEE 29148 criteria
-
-**MCP Resources (context for AI):**
-- `elm://projects/{domain}` — Browse projects
-- `elm://project/{name}/modules` — Browse modules
-- `elm://project/{name}/module/{name}/requirements` — Read requirements
-
----
-
-## Supported AI Assistants
-
-| Assistant | MCP Config Location | Restart? |
-|-----------|-------------------|----------|
-| **Claude Code** | `~/.claude/settings.json` | No — hot-reloads |
-| **VS Code (Bob / Copilot)** | `.vscode/mcp.json` | Reload window |
-| **Cursor** | `.cursor/mcp.json` | Reload window |
-| **Windsurf** | `~/.codeium/windsurf/mcp_config.json` | Reload window |
-
-The AI auto-detects your IDE and writes the config for you.
-
----
-
-## Optional: .env File
-
-To skip entering credentials every session, create a `.env` file:
+### Verify it works any time
 
 ```bash
-cp .env.example .env
-# Edit .env with your actual credentials
+python3 setup.py --diagnose
 ```
 
-The server auto-connects when `.env` is present. Handles both Basic Auth and Form-Based Auth (j_security_check), and auto-retries with SSL verification disabled for self-signed certificates.
+Skips installation and config writes. Just:
+1. Confirms the current Python can import every dependency
+2. Launches `doors_mcp_server.py` as a subprocess, runs the MCP `initialize` handshake, calls `tools/list`, asserts ≥1 tool registered (proves the server actually starts)
+3. Optionally exercises ELM auth if `.env` has credentials
+
+Use this when something feels off — server "not found" in your IDE, password rotated, Python upgraded, etc.
 
 ---
 
-## Project Structure
+## Bring your own LLM
 
-```
-doors-next-ai-agent/
-├── BOB.md                 # Instructions the AI reads automatically
-├── CLAUDE.md              # Pointer to BOB.md for Claude Code
-├── LIFECYCLE.md           # Full lifecycle vision and status tracker
-├── README.md              # This file
-├── doors_client.py        # ELM API client (DNG + EWM + ETM)
-├── doors_mcp_server.py    # MCP server (20 tools, 4 prompts, 3 resources)
-├── requirements.txt       # Python dependencies
-└── .env.example           # Credential template
-```
+This repo is the **hands**, not the brain. Same server works against any MCP-speaking host:
+
+| AI Assistant | Config file `setup.py` writes | Doc reference |
+|---|---|---|
+| **Claude Code** | `~/.claude.json` (user) + `.mcp.json` (project) | https://code.claude.com/docs/en/mcp |
+| **VS Code** (Copilot / Bob) | `.vscode/mcp.json` (workspace) | https://code.visualstudio.com/docs/copilot/customization/mcp-servers |
+| **Cursor** | `.cursor/mcp.json` (workspace) + `~/.cursor/mcp.json` (user) | https://cursor.com/docs/context/mcp |
+| **Windsurf** | `~/.codeium/windsurf/mcp_config.json` | https://docs.windsurf.com/windsurf/cascade/mcp |
+
+`setup.py` writes to every host it detects in one run.
 
 ---
 
-## Engineering Quality
+## Credentials
 
-Requirements generated by this agent follow IEEE 29148 / INCOSE best practices:
-- **"shall" language** for mandatory behavior
-- **Atomic** — one testable behavior per requirement
-- **Measurable acceptance criteria** — numeric thresholds, time limits, conditions
-- **Standards compliance** — references to DO-178C, ISO 26262, MIL-STD-882, etc. when applicable
-- **Structured test cases** — preconditions, numbered steps, expected results, pass/fail criteria
+`setup.py` walks you through it. Under the hood it writes a local `.env`:
+
+```
+DOORS_URL=https://your-server.com
+DOORS_USERNAME=your_username
+DOORS_PASSWORD=your_password
+```
+
+`.env` is gitignored. The server handles **Basic Auth and Form-Based Auth (`j_security_check`)** automatically and falls back to disabled SSL verification for self-signed certs — you don't need to know which one your server uses.
+
+To re-enter credentials later, delete `.env` and re-run `setup.py`.
+
+---
+
+## The proper development flow
+
+This is what good engineering looks like with ELM, and what the AI should follow. **Each phase has a user-approval gate** — the AI shouldn't blast through all four without checking in.
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ PHASE 1 — REQUIREMENTS  (DNG)                               │
+│ AI generates atomic "shall" statements. Organized in a      │
+│ module. IEEE 29148 / INCOSE compliant: atomic, verifiable,  │
+│ unambiguous. Status starts at "Proposed".                   │
+│ ─→ AI STOPS. "Review these. Approve to continue?"           │
+└─────────────────────────────────────────────────────────────┘
+                             ↓ user approves
+┌─────────────────────────────────────────────────────────────┐
+│ PHASE 2 — IMPLEMENTATION TASKS  (EWM)   only if user wants  │
+│ One Task per requirement. Linked via                        │
+│ calm:implementsRequirement. Owner / iteration / estimate    │
+│ default unset.                                              │
+│ ─→ "Want me to create test cases too?"                      │
+└─────────────────────────────────────────────────────────────┘
+                             ↓ user approves
+┌─────────────────────────────────────────────────────────────┐
+│ PHASE 3 — TEST CASES  (ETM)             only if user wants  │
+│ One Test Case per requirement. Linked via                   │
+│ oslc_qm:validatesRequirement. Test steps, expected results, │
+│ pass/fail conditions live HERE — not inside the requirement.│
+└─────────────────────────────────────────────────────────────┘
+                             ↓ post-implementation
+┌─────────────────────────────────────────────────────────────┐
+│ PHASE 4 — DEFECTS  (EWM)                when tests fail     │
+│ Failing test result triggers a Defect (with proper          │
+│ Filed Against resolution). Linked back to test result and   │
+│ original requirement. Transitioned through workflow.        │
+└─────────────────────────────────────────────────────────────┘
+```
+
+What the AI **will not** do automatically:
+- Push past Phase 1 without explicit user approval
+- Mark a requirement "Approved" — that's a human gate
+- Skip cross-domain links — every artifact traces back
+
+The full instructions the AI reads are in [BOB.md](BOB.md).
+
+---
+
+## Rich text in requirements
+
+`create_requirements`'s `content` field accepts three input shapes (the AI picks whichever is easiest):
+
+1. **Raw XHTML** — for hand-built complex layouts. Pass-through when content starts with `<`. Must be valid XML — only the 5 XML entities (`&amp; &lt; &gt; &quot; &apos;`); use literal Unicode for everything else (`±`, `°`, etc.). Named HTML entities like `&plusmn;` will reject.
+2. **Markdown** — full Markdown including tables, images, headings, lists, links, bold/italic, code blocks. Auto-converted to XHTML.
+3. **Plain text** — paragraphs split on blank lines; lines starting with `- ` or `* ` become bulleted lists.
+
+DNG renders the result in `jazz_rm:primaryText` (the rich-text body), not `dcterms:description` (which is a short summary).
+
+**Image caveat:** DNG's CSP may block external image URLs. If your image doesn't render, upload it as a DNG attachment and reference the internal URL — or use a `data:` URI for small images.
+
+---
+
+## Known limitations
+
+These are **server-side restrictions**, not bugs in this MCP:
+
+- **Adding requirements to a module's structure programmatically** is locked down on most ELM deployments. The standard OSLC PUT/PATCH pattern that works for every other write returns `400 "Content must be valid rdf+xml"` only when the change involves `oslc_rm:uses`. ReqIF import is the only documented path; not yet implemented in this MCP. Workaround: `create_module` + `create_requirements` produces the module + a folder of requirements, then drag them into the module in DNG UI. (Full investigation: [probe/MODULE_BINDING_FINDINGS.md](probe/MODULE_BINDING_FINDINGS.md).)
+- **Some ELM features depend on server version / feature flags** — DNG glossary, link validity, certain GCM operations may return 404 on older deployments.
+- **Permissions vary per project** — `setup.py --diagnose` confirms auth works, but write permissions are project-scoped in DNG/EWM/ETM. If a write fails with 403, it's a permission grant in your DNG admin, not a code bug.
 
 ---
 
@@ -120,16 +170,42 @@ Requirements generated by this agent follow IEEE 29148 / INCOSE best practices:
 
 | Problem | Fix |
 |---------|-----|
-| AI can't see the MCP server | Reload your IDE window (or restart for first-time setup) |
-| Authentication fails | Check username/password. The server handles both Basic and Form-Based Auth automatically. |
-| SSL certificate error | The server auto-retries without SSL verification for self-signed certs. |
-| No modules found | Check your DNG permissions for that project |
-| Search returns no results | OSLC query is used — ensure the project has indexed content |
-| EWM/ETM creation fails with 403 | Your user needs write permissions in the target EWM/ETM project |
+| `setup.py`: "No AI assistants detected" | Install one of Claude Code / VS Code / Cursor / Windsurf, then re-run. |
+| AI can't see the MCP server | Restart your IDE. Run `python3 setup.py --diagnose` to verify the server itself works independent of the IDE. |
+| Connection test fails | The error tells you what's wrong (bad password, unreachable server, cert issue). Fix the one thing and re-run. |
+| EWM/ETM/DNG creation fails with 403 | Your account needs Create permission in that project. Open the project's admin → Permissions and grant your role write access. |
+| Requirements created but Primary Text is empty | Older artifacts only — this was a bug fixed Apr 2026. New requirements use `jazz_rm:primaryText` correctly. Re-run with the AI to recreate. |
+| "Module created but requirements aren't in it" | DNG locks `oslc_rm:uses` writes; see Known Limitations above. |
+| Charts don't render in chat | Make sure your AI tool can display markdown images. Worst case, open the file directly — paths are printed. |
 
 ---
 
-## Support
+## Project structure
 
-- GitHub Issues: https://github.com/brettscharm/doors-next-ai-agent/issues
-- Email: brett.scharmett@ibm.com
+```
+doors-next-ai-agent/
+├── setup.py               # One-command installer + --diagnose flag
+├── doors_mcp_server.py    # MCP server (35 tools, 4 prompts, 3 resources)
+├── doors_client.py        # ELM REST client (DNG + EWM + ETM + GCM + SCM)
+├── BOB.md                 # Instructions the AI reads automatically
+├── CLAUDE.md              # Pointer to BOB.md for Claude Code
+├── LIFECYCLE.md           # Full requirements-to-test lifecycle reference
+├── README.md              # This file
+├── requirements.txt       # Python dependencies
+├── .env.example           # Credential template (copied to .env by setup)
+├── .mcp.json              # Project-local Claude Code MCP entry (gen by setup)
+├── charts/                # Generated PNGs (gitignored)
+└── probe/                 # Live-server probes + research reports
+    ├── OSLC_GAPS.md       # Tool gap analysis
+    ├── SCM_RESEARCH.md    # SCM + code review research
+    └── MODULE_BINDING_FINDINGS.md  # Why module-binding is locked down
+```
+
+---
+
+## Contributing / Issues
+
+- GitHub issues: https://github.com/brettscharm/doors-next-ai-agent/issues
+- Email: brett.scharmett@ibm.com  *(personal capacity — not IBM support)*
+
+PRs welcome. The probes in `probe/` document everything we've learned about the live ELM API surface; new tools should follow the patterns in `doors_client.py` (GET-with-ETag → modify → PUT-with-If-Match for updates; service-provider-discovery → POST to creation factory for creates) and add a one-line live-test entry to `probe/A_C_LIVE_TESTS.txt` if exercising new endpoints.

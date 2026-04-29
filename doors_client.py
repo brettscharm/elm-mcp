@@ -7,6 +7,7 @@ NOT an official IBM product. Use at your own risk.
 """
 
 import os
+import re
 import csv
 import json
 import xml.etree.ElementTree as ET
@@ -964,6 +965,114 @@ class DOORSNextClient:
         except Exception as e:
             return {'error': str(e)}
 
+    def add_to_module(self, module_url: str, requirement_urls: List[str]) -> Dict:
+        """Attempt to bind existing requirements to a DNG module.
+
+        The standard OSLC RM 2.0 pattern (GET module + ETag, append
+        <oslc_rm:uses>, PUT with If-Match) is implemented here for DNG
+        deployments that allow it. On goblue.clm.ibmcloud.com this returns
+        HTTP 400 "Content must be valid rdf+xml" no matter what — module
+        structure is locked down and only writeable via DNG UI / ReqIF
+        import on this server. See probe/MODULE_BINDING_FINDINGS.md.
+
+        Args:
+            module_url: The module artifact URL (typically .../resources/MD_*).
+            requirement_urls: One or more existing requirement URLs to bind.
+
+        Returns:
+            {'added': int, 'module_url': str} on success, or {'error': '...'}.
+            On servers that lock down module-structure writes, the error
+            message guides the user to drag-bind in DNG.
+        """
+        self._ensure_auth()
+
+        if not requirement_urls:
+            return {'error': 'requirement_urls is empty'}
+
+        try:
+            get_resp = self.session.get(
+                module_url,
+                headers={
+                    'Accept': 'application/rdf+xml',
+                    'OSLC-Core-Version': '2.0',
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+                timeout=self._TIMEOUT,
+            )
+            if get_resp.status_code != 200:
+                return {'error': f'Failed to fetch module: HTTP {get_resp.status_code}'}
+            etag = get_resp.headers.get('ETag', '')
+            if not etag:
+                return {'error': 'Module GET returned no ETag — cannot update safely'}
+        except Exception as e:
+            return {'error': f'Failed to fetch module: {e}'}
+
+        rdf_str = get_resp.content.decode('utf-8')
+
+        # Build the new <oslc_rm:uses> lines. Skip URLs already bound (idempotent).
+        existing = set(re.findall(r'oslc_rm:uses\s+rdf:resource="([^"]+)"', rdf_str))
+        to_add = [u for u in requirement_urls if u and u not in existing]
+        if not to_add:
+            return {'added': 0, 'module_url': module_url, 'note': 'all requirements already bound'}
+
+        new_lines = ''.join(
+            f'    <oslc_rm:uses rdf:resource="{u}"/>\n' for u in to_add
+        )
+
+        # Insert before the closing </rdf:Description> of the module's own
+        # description block. The module RDF has the module's rdf:Description
+        # first (its rdf:about matches module_url); injecting before its
+        # closing tag is the safe spot.
+        # We match the FIRST </rdf:Description> after the module's rdf:about.
+        module_about_pattern = re.escape(module_url)
+        injected = re.sub(
+            rf'(<rdf:Description\s+rdf:about="{module_about_pattern}"[^>]*>)(.*?)(\s*</rdf:Description>)',
+            lambda m: f'{m.group(1)}{m.group(2)}\n{new_lines}{m.group(3)}',
+            rdf_str,
+            count=1,
+            flags=re.DOTALL,
+        )
+
+        if injected == rdf_str:
+            # rdf:about may use rdf:nodeID style — fall back to first Description
+            injected = re.sub(
+                r'(<rdf:Description[^>]*>)(.*?)(\s*</rdf:Description>)',
+                lambda m: f'{m.group(1)}{m.group(2)}\n{new_lines}{m.group(3)}',
+                rdf_str,
+                count=1,
+                flags=re.DOTALL,
+            )
+            if injected == rdf_str:
+                return {'error': 'Could not locate module rdf:Description block to inject into'}
+
+        try:
+            put_resp = self.session.put(
+                module_url,
+                data=injected.encode('utf-8'),
+                headers={
+                    'Content-Type': 'application/rdf+xml',
+                    'Accept': 'application/rdf+xml',
+                    'OSLC-Core-Version': '2.0',
+                    'If-Match': etag,
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+                timeout=self._TIMEOUT,
+            )
+            if put_resp.status_code in (200, 204):
+                return {'added': len(to_add), 'module_url': module_url}
+            error_msg = self._extract_oslc_error(put_resp.text)
+            # Server-side restriction: many ELM deployments lock module-structure
+            # writes. Translate the cryptic 400 into something actionable.
+            if put_resp.status_code == 400 and 'valid rdf+xml' in (error_msg or '').lower():
+                return {'error': (
+                    'This DNG server does not allow module-structure writes via OSLC. '
+                    'Open the module in DNG and drag the listed requirements in from the '
+                    'folder, or use ReqIF import for bulk loading.'
+                )}
+            return {'error': f'HTTP {put_resp.status_code}: {error_msg}' if error_msg else f'HTTP {put_resp.status_code}'}
+        except Exception as e:
+            return {'error': f'PUT failed: {e}'}
+
     # ── Write: Folders ────────────────────────────────────────
 
     def create_folder(self, project_url: str, folder_name: str, parent_folder_url: Optional[str] = None) -> Optional[Dict]:
@@ -1338,15 +1447,21 @@ class DOORSNextClient:
                     extra_ns = f' xmlns:rm_link="{lt_base}"'
                     link_ref = f'<rm_link:{lt_id} rdf:resource="{link_target_url}"/>'
 
+        # DNG stores the rich-text body in jazz_rm:primaryText (what users see
+        # and edit in the DNG rich-text editor). dcterms:description is only a
+        # short-summary field — putting the body there leaves Primary Text
+        # blank, which is the bug the user hit.
         rdf = f'''<?xml version="1.0" encoding="UTF-8"?>
 <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
          xmlns:dcterms="http://purl.org/dc/terms/"
          xmlns:oslc_rm="http://open-services.net/ns/rm#"
          xmlns:oslc="http://open-services.net/ns/core#"
-         xmlns:nav="http://jazz.net/ns/rm/navigation#"{extra_ns}>
+         xmlns:nav="http://jazz.net/ns/rm/navigation#"
+         xmlns:jazz_rm="http://jazz.net/ns/rm#"{extra_ns}>
   <oslc_rm:Requirement>
     <dcterms:title>{self._escape_xml(prefixed_title)}</dcterms:title>
-    <dcterms:description rdf:parseType="Literal">{xhtml_content}</dcterms:description>
+    <dcterms:description rdf:parseType="Literal"></dcterms:description>
+    <jazz_rm:primaryText rdf:parseType="Literal">{xhtml_content}</jazz_rm:primaryText>
     <oslc:instanceShape rdf:resource="{shape_url}"/>
     {folder_ref}
     {link_ref}
@@ -1493,23 +1608,88 @@ class DOORSNextClient:
             return {'error': f'PUT failed: {e}'}
 
     def _text_to_xhtml(self, text: str) -> str:
-        """Convert plain text to XHTML content for DNG description field"""
+        """Convert input text to XHTML for DNG's jazz_rm:primaryText field.
+
+        Accepts three input shapes (LLM picks whichever is easiest):
+          1. Raw XHTML — if the text starts with '<' and parses as XML, it's
+             passed through with only the [AI Generated] header prepended.
+             Best for tables / images / complex layouts the LLM hand-builds.
+          2. Markdown — if the `markdown` library is available, headings,
+             tables, images, lists, links, bold/italic, and code blocks all
+             work. Tables use the `tables` extension; raw HTML passes through.
+          3. Plain text — paragraphs split on blank lines; lines starting
+             with '- ' or '* ' become bulleted lists.
+
+        DNG's jazz_rm:primaryText is parseType="Literal" — strict XML, not
+        HTML. So we use only the 5 XML entities (&amp; &lt; &gt; &quot;
+        &apos;) and literal Unicode for everything else (±, °, etc.).
+        """
+        if not text:
+            text = ''
+        stripped = text.strip()
+
+        # Path 1: raw XHTML pass-through
+        if stripped.startswith('<'):
+            inner = stripped
+            # If they wrapped it in <div xmlns="...xhtml">, take the inner.
+            import re as _re
+            m = _re.match(r'^<div\s+xmlns="http://www\.w3\.org/1999/xhtml"[^>]*>(.*)</div>\s*$', inner, _re.DOTALL)
+            if m:
+                inner = m.group(1)
+            return (
+                '<div xmlns="http://www.w3.org/1999/xhtml">'
+                '<p><strong>[AI Generated]</strong></p>'
+                f'{inner}'
+                '</div>'
+            )
+
+        # Path 2: Markdown via the `markdown` library if installed
+        try:
+            import markdown  # type: ignore
+            html = markdown.markdown(
+                text,
+                extensions=['tables', 'fenced_code', 'sane_lists'],
+                output_format='xhtml',
+            )
+            # markdown emits HTML entities for &, <, > already escaped in
+            # text content. Tables/images/lists are real elements.
+            return (
+                '<div xmlns="http://www.w3.org/1999/xhtml">'
+                '<p><strong>[AI Generated]</strong></p>'
+                f'{html}'
+                '</div>'
+            )
+        except ImportError:
+            pass
+
+        # Path 3: plain text fallback (original behavior)
         escaped = self._escape_xml(text)
         paragraphs = escaped.split('\n\n')
         xhtml_parts = []
         for para in paragraphs:
             para = para.strip()
-            if para:
-                # Check if it looks like a bullet list
-                lines = para.split('\n')
-                if all(line.strip().startswith('- ') or line.strip().startswith('* ') for line in lines if line.strip()):
-                    items = ''.join(f'<li>{line.strip().lstrip("- ").lstrip("* ")}</li>' for line in lines if line.strip())
-                    xhtml_parts.append(f'<ul>{items}</ul>')
-                else:
-                    xhtml_parts.append(f'<p>{para}</p>')
+            if not para:
+                continue
+            lines = para.split('\n')
+            if all(
+                line.strip().startswith('- ') or line.strip().startswith('* ')
+                for line in lines if line.strip()
+            ):
+                items = ''.join(
+                    f'<li>{line.strip().lstrip("- ").lstrip("* ")}</li>'
+                    for line in lines if line.strip()
+                )
+                xhtml_parts.append(f'<ul>{items}</ul>')
+            else:
+                xhtml_parts.append(f'<p>{para}</p>')
 
         body = ''.join(xhtml_parts)
-        return f'<div xmlns="http://www.w3.org/1999/xhtml"><p><strong>[AI Generated]</strong></p>{body}</div>'
+        return (
+            '<div xmlns="http://www.w3.org/1999/xhtml">'
+            '<p><strong>[AI Generated]</strong></p>'
+            f'{body}'
+            '</div>'
+        )
 
     def _escape_xml(self, text: str) -> str:
         """Escape special XML characters"""
@@ -2260,6 +2440,1527 @@ class DOORSNextClient:
             }
         except Exception:
             return None
+
+    # ── DNG: arbitrary attribute updates ───────────────────────
+
+    def get_attribute_definitions(self, project_url: str) -> List[Dict]:
+        """Get all attribute property definitions from a DNG project's
+        artifact shapes.
+
+        Walks `oslc:resourceShape` URIs from the project's services.xml,
+        fetches each shape, then for each `oslc:Property` collects:
+          - name (`oslc:name` or `dcterms:title`)
+          - title (display label)
+          - predicate_uri (`oslc:propertyDefinition`)
+          - value_type (`oslc:valueType`)
+          - allowed_values: list of {label, uri} when an `oslc:AllowedValues`
+            block is present (enum-valued attrs).
+
+        Returns a deduped list (one entry per predicate URI).
+        Used by `update_requirement_attributes` to translate a friendly
+        attribute name → predicate URI.
+        """
+        self._ensure_auth()
+        try:
+            resp = self.session.get(
+                project_url,
+                headers={
+                    'Accept': 'application/rdf+xml',
+                    'OSLC-Core-Version': '2.0',
+                },
+                timeout=self._TIMEOUT,
+            )
+            if resp.status_code != 200:
+                return []
+            root = ET.fromstring(resp.content)
+            ns = self._NS_OSLC
+            shape_urls = []
+            for rs in root.findall('.//oslc:resourceShape', ns):
+                shape_url = rs.get(f'{{{ns["rdf"]}}}resource', '')
+                if shape_url:
+                    shape_urls.append(shape_url)
+        except Exception:
+            return []
+
+        ns_oslc = 'http://open-services.net/ns/core#'
+        ns_dct = 'http://purl.org/dc/terms/'
+        ns_rdf = self._NS_OSLC['rdf']
+
+        seen = set()
+        defs: List[Dict] = []
+
+        for shape_url in shape_urls:
+            try:
+                resp2 = self.session.get(
+                    shape_url,
+                    headers={'Accept': 'application/rdf+xml',
+                             'OSLC-Core-Version': '2.0'},
+                    timeout=15,
+                )
+                if resp2.status_code != 200:
+                    continue
+                shape_root = ET.fromstring(resp2.content)
+            except Exception:
+                continue
+
+            # Walk every oslc:Property element
+            for prop in shape_root.iter(f'{{{ns_oslc}}}Property'):
+                pred_el = prop.find(f'{{{ns_oslc}}}propertyDefinition')
+                if pred_el is None:
+                    continue
+                predicate_uri = pred_el.get(f'{{{ns_rdf}}}resource', '')
+                if not predicate_uri or predicate_uri in seen:
+                    continue
+                seen.add(predicate_uri)
+
+                # Title / display name
+                title_el = prop.find(f'{{{ns_dct}}}title')
+                title = title_el.text.strip() if title_el is not None and title_el.text else ''
+                name_el = prop.find(f'{{{ns_oslc}}}name')
+                name_text = (name_el.text.strip() if name_el is not None and name_el.text else '')
+                if name_text:
+                    name = name_text
+                elif title:
+                    name = title
+                else:
+                    name = predicate_uri.split('#')[-1].split('/')[-1]
+
+                # Value type
+                vt_el = prop.find(f'{{{ns_oslc}}}valueType')
+                value_type = vt_el.get(f'{{{ns_rdf}}}resource', '') if vt_el is not None else ''
+
+                # Allowed values (inline form)
+                allowed: List[Dict] = []
+                av_block = prop.find(f'{{{ns_oslc}}}allowedValues')
+                if av_block is not None:
+                    for av in av_block.iter(f'{{{ns_oslc}}}allowedValue'):
+                        uri = av.get(f'{{{ns_rdf}}}resource', '')
+                        if uri:
+                            allowed.append({'label': uri.split('#')[-1].split('/')[-1], 'uri': uri})
+
+                defs.append({
+                    'name': name,
+                    'title': title or name,
+                    'predicate_uri': predicate_uri,
+                    'value_type': value_type,
+                    'allowed_values': allowed,
+                })
+
+        return defs
+
+    def update_requirement_attributes(self, requirement_url: str,
+                                      attributes: Dict[str, object]) -> Dict:
+        """Update arbitrary DNG attributes on a requirement.
+
+        `attributes` is a dict mapping either:
+          - a human-readable attribute name ("Priority", "Stability"), OR
+          - the full predicate URI (e.g. "http://jazz.net/ns/sse#stability"),
+        to the new value.
+
+        Values may be:
+          - a string literal (sets a literal triple),
+          - an http(s) URI (treated as a resource reference),
+          - for enum-valued attributes, the human-readable label of an
+            allowed value (e.g. "High") — resolved via the project's
+            attribute definitions.
+
+        Mirrors `update_requirement`: GET-with-ETag → modify RDF →
+        PUT-with-If-Match.
+
+        Returns {'title', 'url', 'updated': [list of keys applied]} on
+        success, or {'error': ...}.
+        """
+        self._ensure_auth()
+        if not attributes:
+            return {'error': 'No attributes supplied.'}
+
+        # ── Step 1: GET with ETag ───────────────────────────────
+        try:
+            get_resp = self.session.get(
+                requirement_url,
+                headers={
+                    'Accept': 'application/rdf+xml',
+                    'OSLC-Core-Version': '2.0',
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+                timeout=self._TIMEOUT,
+            )
+            if get_resp.status_code != 200:
+                return {'error': f'Failed to fetch requirement: HTTP {get_resp.status_code}'}
+            etag = get_resp.headers.get('ETag', '')
+            if not etag:
+                return {'error': 'Server returned no ETag — refusing to PUT.'}
+        except Exception as e:
+            return {'error': f'Failed to fetch requirement: {e}'}
+
+        rdf_str = get_resp.content.decode('utf-8')
+
+        # ── Step 2: Resolve project_url & attribute definitions ──
+        # Extract serviceProvider from the artifact's RDF
+        project_url = None
+        try:
+            arrt = ET.fromstring(get_resp.content)
+            for elem in arrt.iter():
+                local = elem.tag.split('}')[-1] if '}' in elem.tag else elem.tag
+                if local == 'serviceProvider':
+                    project_url = elem.get(f'{{{self._NS_OSLC["rdf"]}}}resource', '')
+                    if project_url:
+                        break
+        except Exception:
+            pass
+
+        attr_defs: List[Dict] = []
+        if project_url:
+            attr_defs = self.get_attribute_definitions(project_url)
+
+        def _find_def(key: str) -> Optional[Dict]:
+            if not attr_defs:
+                return None
+            # Direct predicate URI match
+            for d in attr_defs:
+                if d['predicate_uri'] == key:
+                    return d
+            # Case-insensitive name / title match
+            kl = key.lower()
+            for d in attr_defs:
+                if d['name'].lower() == kl or d['title'].lower() == kl:
+                    return d
+            # Local-name match
+            for d in attr_defs:
+                local = d['predicate_uri'].split('#')[-1].split('/')[-1]
+                if local.lower() == kl:
+                    return d
+            return None
+
+        # ── Step 3: Apply each attribute ───────────────────────
+        import re
+        applied: List[str] = []
+        # We will inject new triples just before the closing
+        # </rdf:Description> of the artifact's main description.
+        # First find the closing tag for the rdf:Description that contains
+        # rdf:about == requirement_url.
+        for key, raw_value in attributes.items():
+            d = _find_def(key) if not key.startswith('http') else _find_def(key)
+            predicate_uri = d['predicate_uri'] if d else (key if key.startswith('http') else None)
+            if not predicate_uri:
+                # Fall back: use as predicate if it looks URI-ish, else skip.
+                continue
+
+            # Resolve enum value if necessary
+            value = raw_value
+            if d and d.get('allowed_values'):
+                if isinstance(value, str) and not value.startswith('http'):
+                    for av in d['allowed_values']:
+                        if av['label'].lower() == value.lower() or av['uri'].endswith('#' + value):
+                            value = av['uri']
+                            break
+
+            # Decide literal vs resource
+            is_resource = isinstance(value, str) and value.startswith('http')
+
+            # Build a qname: pred:local. Use a generated namespace per predicate.
+            if '#' in predicate_uri:
+                base_ns, local = predicate_uri.rsplit('#', 1)
+                base_ns += '#'
+            else:
+                base_ns, local = predicate_uri.rsplit('/', 1)
+                base_ns += '/'
+            # Sanitize local name for XML
+            qname_local = re.sub(r'[^A-Za-z0-9_]', '_', local)
+            ns_prefix = f'attr_{abs(hash(base_ns)) % 10000}'
+
+            # If predicate already exists, replace the triple's value
+            #   pattern matches:  <(prefix:|ns:)local ...>...</...>  OR self-closing
+            # We'll just match any prefix:local with that local — DNG returns
+            # known prefixes in the artifact RDF.
+            existing_pat = re.compile(
+                rf'<([A-Za-z][A-Za-z0-9_]*):{re.escape(local)}\b[^>]*?(/>|>.*?</\1:{re.escape(local)}>)',
+                re.DOTALL,
+            )
+            existing = existing_pat.search(rdf_str)
+            if existing:
+                # Replace its content
+                if is_resource:
+                    new_triple = f'<{existing.group(1)}:{local} rdf:resource="{value}"/>'
+                else:
+                    safe = self._escape_xml(str(value))
+                    new_triple = f'<{existing.group(1)}:{local}>{safe}</{existing.group(1)}:{local}>'
+                rdf_str = rdf_str[:existing.start()] + new_triple + rdf_str[existing.end():]
+                applied.append(key)
+                continue
+
+            # Otherwise inject a new triple. We need the namespace declared.
+            # If a prefix isn't declared, declare one on the rdf:RDF tag.
+            ns_declared = (f'xmlns:{ns_prefix}="{base_ns}"' in rdf_str
+                           or f'="{base_ns}"' in rdf_str)
+            if not ns_declared:
+                rdf_str = re.sub(
+                    r'(<rdf:RDF\b[^>]*)',
+                    rf'\1 xmlns:{ns_prefix}="{base_ns}"',
+                    rdf_str,
+                    count=1,
+                )
+                prefix_to_use = ns_prefix
+            else:
+                # Find the existing prefix that points at base_ns
+                m = re.search(rf'xmlns:([A-Za-z][A-Za-z0-9_]*)="{re.escape(base_ns)}"', rdf_str)
+                prefix_to_use = m.group(1) if m else ns_prefix
+
+            if is_resource:
+                triple = f'\n    <{prefix_to_use}:{local} rdf:resource="{value}"/>'
+            else:
+                safe = self._escape_xml(str(value))
+                triple = f'\n    <{prefix_to_use}:{local}>{safe}</{prefix_to_use}:{local}>'
+
+            # Inject before </rdf:Description> of the requirement (the one
+            # whose rdf:about matches requirement_url).
+            inject_pat = re.compile(
+                rf'(<rdf:Description\b[^>]*rdf:about="{re.escape(requirement_url)}"[^>]*>)(.*?)(</rdf:Description>)',
+                re.DOTALL,
+            )
+            inj = inject_pat.search(rdf_str)
+            if inj:
+                rdf_str = rdf_str[:inj.start()] + inj.group(1) + inj.group(2) + triple + '\n  ' + inj.group(3) + rdf_str[inj.end():]
+            else:
+                # Fallback: inject before any closing rdf:Description
+                rdf_str = rdf_str.replace('</rdf:Description>', triple + '\n  </rdf:Description>', 1)
+            applied.append(key)
+
+        # ── Step 4: PUT with If-Match ───────────────────────────
+        try:
+            put_resp = self.session.put(
+                requirement_url,
+                data=rdf_str.encode('utf-8'),
+                headers={
+                    'Content-Type': 'application/rdf+xml',
+                    'Accept': 'application/rdf+xml',
+                    'OSLC-Core-Version': '2.0',
+                    'If-Match': etag,
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+                timeout=self._TIMEOUT,
+            )
+            if put_resp.status_code in [200, 204]:
+                return {
+                    'url': requirement_url,
+                    'updated': applied,
+                }
+            error_msg = self._extract_oslc_error(put_resp.text)
+            return {'error': f'HTTP {put_resp.status_code}: {error_msg}' if error_msg
+                    else f'HTTP {put_resp.status_code}'}
+        except Exception as e:
+            return {'error': f'PUT failed: {e}'}
+
+    # ── EWM: arbitrary work-item updates ───────────────────────
+
+    def update_work_item(self, workitem_url: str,
+                         fields: Dict[str, object]) -> Dict:
+        """Update an EWM/CCM work item with the given fields.
+
+        `fields` keys may be:
+          - friendly names ("title", "description", "state"),
+          - or full predicate URIs (e.g. "http://purl.org/dc/terms/title").
+
+        Friendly aliases map to:
+          title       -> dcterms:title
+          description -> dcterms:description
+          state       -> rtc_cm:state (must be a state URI)
+          owner       -> dcterms:contributor
+          severity    -> oslc_cmx:severity (must be a severity URI)
+          priority    -> oslc_cmx:priority (must be a priority URI)
+          subject     -> dcterms:subject
+
+        Uses GET-with-ETag → PUT-with-If-Match.
+        """
+        self._ensure_auth()
+        if not fields:
+            return {'error': 'No fields supplied.'}
+
+        ALIASES = {
+            'title': 'http://purl.org/dc/terms/title',
+            'description': 'http://purl.org/dc/terms/description',
+            'state': 'http://jazz.net/xmlns/prod/jazz/rtc/cm/1.0/state',
+            'owner': 'http://purl.org/dc/terms/contributor',
+            'severity': 'http://open-services.net/ns/cm-x#severity',
+            'priority': 'http://open-services.net/ns/cm-x#priority',
+            'subject': 'http://purl.org/dc/terms/subject',
+            'filedAgainst': 'http://jazz.net/xmlns/prod/jazz/rtc/cm/1.0/filedAgainst',
+        }
+
+        try:
+            get_resp = self.session.get(
+                workitem_url,
+                headers={
+                    'Accept': 'application/rdf+xml',
+                    'OSLC-Core-Version': '2.0',
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+                timeout=self._TIMEOUT,
+            )
+            if get_resp.status_code != 200:
+                return {'error': f'Failed to fetch work item: HTTP {get_resp.status_code}'}
+            etag = get_resp.headers.get('ETag', '')
+            if not etag:
+                return {'error': 'Server returned no ETag — refusing to PUT.'}
+        except Exception as e:
+            return {'error': f'Failed to fetch work item: {e}'}
+
+        rdf_str = get_resp.content.decode('utf-8')
+
+        import re
+        applied: List[str] = []
+
+        for key, raw_value in fields.items():
+            predicate_uri = ALIASES.get(key.lower(), key if key.startswith('http') else None)
+            if not predicate_uri:
+                continue
+            value = raw_value
+            is_resource = isinstance(value, str) and value.startswith('http')
+
+            if '#' in predicate_uri:
+                base_ns, local = predicate_uri.rsplit('#', 1)
+                base_ns += '#'
+            else:
+                base_ns, local = predicate_uri.rsplit('/', 1)
+                base_ns += '/'
+
+            existing_pat = re.compile(
+                rf'<([A-Za-z][A-Za-z0-9_]*):{re.escape(local)}\b[^>]*?(/>|>.*?</\1:{re.escape(local)}>)',
+                re.DOTALL,
+            )
+            existing = existing_pat.search(rdf_str)
+            if existing:
+                if is_resource:
+                    new_triple = f'<{existing.group(1)}:{local} rdf:resource="{value}"/>'
+                else:
+                    safe = self._escape_xml(str(value))
+                    new_triple = f'<{existing.group(1)}:{local}>{safe}</{existing.group(1)}:{local}>'
+                rdf_str = rdf_str[:existing.start()] + new_triple + rdf_str[existing.end():]
+                applied.append(key)
+                continue
+
+            # Inject new triple
+            m = re.search(rf'xmlns:([A-Za-z][A-Za-z0-9_]*)="{re.escape(base_ns)}"', rdf_str)
+            if m:
+                prefix = m.group(1)
+            else:
+                prefix = f'attr_{abs(hash(base_ns)) % 10000}'
+                rdf_str = re.sub(
+                    r'(<rdf:RDF\b[^>]*)',
+                    rf'\1 xmlns:{prefix}="{base_ns}"',
+                    rdf_str,
+                    count=1,
+                )
+
+            if is_resource:
+                triple = f'\n    <{prefix}:{local} rdf:resource="{value}"/>'
+            else:
+                safe = self._escape_xml(str(value))
+                triple = f'\n    <{prefix}:{local}>{safe}</{prefix}:{local}>'
+
+            rdf_str = rdf_str.replace('</rdf:Description>', triple + '\n  </rdf:Description>', 1)
+            applied.append(key)
+
+        try:
+            put_resp = self.session.put(
+                workitem_url,
+                data=rdf_str.encode('utf-8'),
+                headers={
+                    'Content-Type': 'application/rdf+xml',
+                    'Accept': 'application/rdf+xml',
+                    'OSLC-Core-Version': '2.0',
+                    'If-Match': etag,
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+                timeout=self._TIMEOUT,
+            )
+            if put_resp.status_code in [200, 204]:
+                return {'url': workitem_url, 'updated': applied}
+            error_msg = self._extract_oslc_error(put_resp.text)
+            return {'error': f'HTTP {put_resp.status_code}: {error_msg}' if error_msg
+                    else f'HTTP {put_resp.status_code}'}
+        except Exception as e:
+            return {'error': f'PUT failed: {e}'}
+
+    def transition_work_item(self, workitem_url: str, target_state: str) -> Dict:
+        """Transition an EWM work item to the named state.
+
+        EWM enforces workflow gates: a plain PUT that swaps `rtc_cm:state`
+        is silently ignored. The supported path is to PUT with the
+        `?_action=<actionId>` query parameter, where actionId is one of the
+        workflow's named actions (e.g. `...action.startWorking`).
+
+        Strategy:
+          1. GET the WI; record current state URI and ETag.
+          2. GET the action collection (`/ccm/oslc/workflows/<paId>/actions/<wfId>`)
+             and the state collection (`/ccm/oslc/workflows/<paId>/states/<wfId>`).
+          3. Match `target_state` against state titles/identifiers; record
+             the target state URI.
+          4. Pick the best-matching action — by checking which action's
+             local-name aligns with the target state's local name (e.g.
+             `state.inDevelopment` ↔ `action.startWorking`). Failing that,
+             try each action in order until one succeeds.
+          5. PUT the modified RDF (with new `rtc_cm:state`) to
+             `<workitem_url>?_action=<actionId>` with `If-Match`.
+
+        Returns {'url', 'state', 'action'} on success.
+        """
+        self._ensure_auth()
+        try:
+            get_resp = self.session.get(
+                workitem_url,
+                headers={
+                    'Accept': 'application/rdf+xml',
+                    'OSLC-Core-Version': '2.0',
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+                timeout=self._TIMEOUT,
+            )
+            if get_resp.status_code != 200:
+                return {'error': f'Failed to fetch work item: HTTP {get_resp.status_code}'}
+            etag = get_resp.headers.get('ETag', '')
+        except Exception as e:
+            return {'error': f'Failed to fetch work item: {e}'}
+
+        import re
+        rdf_str = get_resp.content.decode('utf-8')
+        sm = re.search(
+            r'<[A-Za-z0-9_]+:state\s+rdf:resource="([^"]+/workflows/[^"]+)"\s*/>',
+            rdf_str,
+        )
+        if not sm:
+            return {'error': 'Could not find rtc_cm:state on the work item.'}
+        current_state_uri = sm.group(1)
+
+        base_match = re.match(r'(.+/workflows/[^/]+)/states/([^/]+)/[^/]+$', current_state_uri)
+        if not base_match:
+            return {'error': f'Could not parse workflow base from: {current_state_uri}'}
+        wf_base = base_match.group(1)        # .../workflows/<paId>
+        wf_id = base_match.group(2)          # e.g. com.ibm.team.workitem.taskWorkflow
+        states_list_url = f"{wf_base}/states/{wf_id}"
+        actions_list_url = f"{wf_base}/actions/{wf_id}"
+
+        try:
+            states_resp = self.session.get(
+                states_list_url,
+                headers={'Accept': 'application/rdf+xml', 'OSLC-Core-Version': '2.0'},
+                timeout=self._TIMEOUT,
+            )
+            if states_resp.status_code != 200:
+                return {'error': f'Failed to fetch states: HTTP {states_resp.status_code}'}
+            sroot = ET.fromstring(states_resp.content)
+
+            actions_resp = self.session.get(
+                actions_list_url,
+                headers={'Accept': 'application/rdf+xml', 'OSLC-Core-Version': '2.0'},
+                timeout=self._TIMEOUT,
+            )
+            aroot = ET.fromstring(actions_resp.content) if actions_resp.status_code == 200 else None
+        except Exception as e:
+            return {'error': f'Failed to fetch workflow metadata: {e}'}
+
+        ns_dct = 'http://purl.org/dc/terms/'
+        ns_rdf = self._NS_OSLC['rdf']
+        ns_rdfs = 'http://www.w3.org/2000/01/rdf-schema#'
+
+        # Find target state URI
+        target_lower = target_state.lower()
+        target_state_uri = None
+        target_state_local = ''
+        for desc in sroot.findall(f'{{{ns_rdf}}}Description'):
+            about = desc.get(f'{{{ns_rdf}}}about', '')
+            if '/states/' not in about or about == states_list_url:
+                continue
+            title_el = desc.find(f'{{{ns_dct}}}title')
+            ident_el = desc.find(f'{{{ns_dct}}}identifier')
+            t = (title_el.text or '').strip() if title_el is not None else ''
+            i = (ident_el.text or '').strip() if ident_el is not None else ''
+            if (t.lower() == target_lower
+                or i.lower() == target_lower
+                or i.lower().endswith('.' + target_lower.replace(' ', ''))
+                or target_lower in t.lower()):
+                target_state_uri = about
+                target_state_local = (i or about.rsplit('/', 1)[-1]).rsplit('.', 1)[-1].lower()
+                break
+
+        if not target_state_uri:
+            return {'error': f"State '{target_state}' not found in this workflow."}
+
+        # Build candidate action list (URIs)
+        action_uris: List[str] = []
+        if aroot is not None:
+            for member in aroot.iter(f'{{{ns_rdfs}}}member'):
+                u = member.get(f'{{{ns_rdf}}}resource', '')
+                if u:
+                    action_uris.append(u)
+
+        # Heuristic ranking: prefer action whose local-suffix is "similar"
+        # to the target state's local name (e.g. inDevelopment <-> startWorking
+        # both contain "work"; complete <-> done; reopen <-> new). This is
+        # imperfect; we'll fall back to trying everything.
+        STATE_HINTS = {
+            'indevelopment': ['startworking', 'startwork', 'inprogress', 'begin'],
+            'done': ['complete', 'finish', 'close', 'resolve'],
+            'new': ['reopen', 'new', 'open'],
+            'invalid': ['invalidate', 'reject'],
+        }
+        wanted = STATE_HINTS.get(target_state_local, [target_state_local])
+        action_local = lambda u: u.rsplit('/', 1)[-1].rsplit('.', 1)[-1].lower()
+        action_uris.sort(
+            key=lambda u: (
+                0 if any(h in action_local(u) for h in wanted) else
+                1 if target_state_local in action_local(u) else 2
+            )
+        )
+
+        new_rdf = re.sub(
+            r'<([A-Za-z0-9_]+):state\s+rdf:resource="[^"]+"\s*/>',
+            rf'<\1:state rdf:resource="{target_state_uri}"/>',
+            rdf_str,
+            count=1,
+        )
+
+        # Try each action in ranked order.
+        last_error = ''
+        for au in action_uris:
+            action_id = au.rsplit('/', 1)[-1]
+            put_url = workitem_url + ('&' if '?' in workitem_url else '?') + 'oslc_cm.properties=&' + 'rtc_cm.action=' + action_id  # build below differently
+            put_url = workitem_url + ('&' if '?' in workitem_url else '?') + '_action=' + action_id
+            try:
+                put_resp = self.session.put(
+                    put_url,
+                    data=new_rdf.encode('utf-8'),
+                    headers={
+                        'Content-Type': 'application/rdf+xml',
+                        'Accept': 'application/rdf+xml',
+                        'OSLC-Core-Version': '2.0',
+                        'If-Match': etag,
+                        'X-Requested-With': 'XMLHttpRequest',
+                    },
+                    timeout=self._TIMEOUT,
+                )
+            except Exception as e:
+                last_error = str(e)
+                continue
+
+            if put_resp.status_code in (200, 204):
+                # Verify the state actually changed by re-GETing.
+                try:
+                    verify = self.session.get(
+                        workitem_url,
+                        headers={'Accept': 'application/rdf+xml',
+                                 'OSLC-Core-Version': '2.0'},
+                        timeout=self._TIMEOUT,
+                    )
+                    vm = re.search(
+                        r'<[A-Za-z0-9_]+:state\s+rdf:resource="([^"]+)"',
+                        verify.text,
+                    )
+                    if vm and vm.group(1) == target_state_uri:
+                        return {
+                            'url': workitem_url,
+                            'state': target_state_uri,
+                            'action': action_id,
+                        }
+                    # else: action was accepted but transitioned to a
+                    # different state — keep trying.
+                    if vm:
+                        last_error = f"Action {action_id} moved state to {vm.group(1).rsplit('.', 1)[-1]}, not target."
+                    # Re-fetch ETag for next attempt
+                    etag = verify.headers.get('ETag', etag)
+                except Exception:
+                    pass
+            else:
+                em = self._extract_oslc_error(put_resp.text)
+                last_error = f'HTTP {put_resp.status_code}: {em}' if em else f'HTTP {put_resp.status_code}'
+
+        return {'error': f"No workflow action transitioned to '{target_state}'. "
+                          f"Last attempt: {last_error}"}
+
+    def query_work_items(self, ewm_project_url: str, where: str = '',
+                         select: str = '*', page_size: int = 25) -> List[Dict]:
+        """Query EWM work items via OSLC CM.
+
+        Endpoint:
+            /ccm/oslc/contexts/<paId>/workitems?oslc.where=...&oslc.select=...
+
+        Returns list of dicts: id, title, state, type, owner, modified, url.
+        Empty list on error.
+        """
+        self._ensure_auth()
+        # Resolve query base from the project's services.xml
+        try:
+            sp_resp = self.session.get(
+                ewm_project_url,
+                headers={
+                    'Accept': 'application/rdf+xml',
+                    'OSLC-Core-Version': '2.0',
+                },
+                timeout=self._TIMEOUT,
+            )
+            if sp_resp.status_code != 200:
+                return []
+            sproot = ET.fromstring(sp_resp.content)
+            ns = self._NS_OSLC
+            query_base = ''
+            for qc in sproot.findall('.//oslc:QueryCapability', ns):
+                qb = qc.find('oslc:queryBase', ns)
+                if qb is not None:
+                    query_base = qb.get(f'{{{ns["rdf"]}}}resource', '')
+                    if query_base:
+                        break
+            if not query_base:
+                return []
+        except Exception:
+            return []
+
+        import urllib.parse
+        params = []
+        if where:
+            params.append(('oslc.where', where))
+        if select:
+            params.append(('oslc.select', select))
+        params.append(('oslc.pageSize', str(page_size)))
+        url = query_base + ('&' if '?' in query_base else '?') + urllib.parse.urlencode(params)
+
+        try:
+            resp = self.session.get(
+                url,
+                headers={
+                    'Accept': 'application/rdf+xml',
+                    'OSLC-Core-Version': '2.0',
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+                timeout=self._TIMEOUT,
+            )
+            if resp.status_code != 200:
+                return []
+            root = ET.fromstring(resp.content)
+        except Exception:
+            return []
+
+        ns_rdf = self._NS_OSLC['rdf']
+        ns_dct = 'http://purl.org/dc/terms/'
+        ns_rtc = 'http://jazz.net/xmlns/prod/jazz/rtc/cm/1.0/'
+
+        out: List[Dict] = []
+        for desc in root.findall(f'{{{ns_rdf}}}Description'):
+            about = desc.get(f'{{{ns_rdf}}}about', '')
+            # Only real work items: /resource/itemName/.../WorkItem/<id> or
+            # /oslc/contexts/<paId>/workitems/<id>. Skip shape descriptors.
+            if not (
+                '/com.ibm.team.workitem.WorkItem/' in about
+                or '/contexts/' in about and '/workitems/' in about and not about.endswith('/services.xml')
+            ):
+                continue
+            if '/shapes/' in about or '/shape/' in about:
+                continue
+            title_el = desc.find(f'{{{ns_dct}}}title')
+            ident_el = desc.find(f'{{{ns_dct}}}identifier')
+            mod_el = desc.find(f'{{{ns_dct}}}modified')
+            type_el = desc.find(f'{{{ns_rtc}}}type')
+            state_el = desc.find(f'{{{ns_rtc}}}state')
+            contrib_el = desc.find(f'{{{ns_dct}}}contributor')
+            out.append({
+                'url': about,
+                'id': (ident_el.text.strip() if ident_el is not None and ident_el.text else
+                       (about.rstrip('/').split('/')[-1])),
+                'title': title_el.text.strip() if title_el is not None and title_el.text else '',
+                'modified': mod_el.text.strip() if mod_el is not None and mod_el.text else '',
+                'type': type_el.get(f'{{{ns_rdf}}}resource', '') if type_el is not None else '',
+                'state': state_el.get(f'{{{ns_rdf}}}resource', '') if state_el is not None else '',
+                'owner': contrib_el.get(f'{{{ns_rdf}}}resource', '') if contrib_el is not None else '',
+            })
+        return out
+
+    # ── Cross-domain link creation ─────────────────────────────
+
+    def create_link(self, source_url: str, link_type_uri: str,
+                    target_url: str) -> Dict:
+        """Create an OSLC link between two existing artifacts.
+
+        Auto-detects source domain from URL and uses GET-with-ETag →
+        PUT-with-If-Match (DNG, EWM, ETM all support this on their
+        artifact resource URLs).
+
+        Returns {'source', 'target', 'link_type'} on success, else
+        {'error': ...}.
+        """
+        self._ensure_auth()
+        try:
+            get_resp = self.session.get(
+                source_url,
+                headers={
+                    'Accept': 'application/rdf+xml',
+                    'OSLC-Core-Version': '2.0',
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+                timeout=self._TIMEOUT,
+            )
+            if get_resp.status_code != 200:
+                return {'error': f'Failed to fetch source: HTTP {get_resp.status_code}'}
+            etag = get_resp.headers.get('ETag', '')
+            if not etag:
+                return {'error': 'Source returned no ETag — refusing to PUT.'}
+        except Exception as e:
+            return {'error': f'Failed to fetch source: {e}'}
+
+        rdf_str = get_resp.content.decode('utf-8')
+        import re
+
+        if '#' in link_type_uri:
+            base_ns, local = link_type_uri.rsplit('#', 1)
+            base_ns += '#'
+        else:
+            base_ns, local = link_type_uri.rsplit('/', 1)
+            base_ns += '/'
+
+        m = re.search(rf'xmlns:([A-Za-z][A-Za-z0-9_]*)="{re.escape(base_ns)}"', rdf_str)
+        if m:
+            prefix = m.group(1)
+        else:
+            prefix = f'lt_{abs(hash(base_ns)) % 10000}'
+            rdf_str = re.sub(
+                r'(<rdf:RDF\b[^>]*)',
+                rf'\1 xmlns:{prefix}="{base_ns}"',
+                rdf_str,
+                count=1,
+            )
+
+        triple = f'\n    <{prefix}:{local} rdf:resource="{target_url}"/>'
+
+        # Inject inside the rdf:Description for source_url, if present
+        inj_pat = re.compile(
+            rf'(<rdf:Description\b[^>]*rdf:about="{re.escape(source_url)}"[^>]*>)(.*?)(</rdf:Description>)',
+            re.DOTALL,
+        )
+        inj = inj_pat.search(rdf_str)
+        if inj:
+            rdf_str = (rdf_str[:inj.start()] + inj.group(1) + inj.group(2)
+                       + triple + '\n  ' + inj.group(3) + rdf_str[inj.end():])
+        else:
+            rdf_str = rdf_str.replace('</rdf:Description>', triple + '\n  </rdf:Description>', 1)
+
+        try:
+            put_resp = self.session.put(
+                source_url,
+                data=rdf_str.encode('utf-8'),
+                headers={
+                    'Content-Type': 'application/rdf+xml',
+                    'Accept': 'application/rdf+xml',
+                    'OSLC-Core-Version': '2.0',
+                    'If-Match': etag,
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+                timeout=self._TIMEOUT,
+            )
+            if put_resp.status_code in [200, 204]:
+                return {'source': source_url, 'target': target_url, 'link_type': link_type_uri}
+            error_msg = self._extract_oslc_error(put_resp.text)
+            return {'error': f'HTTP {put_resp.status_code}: {error_msg}' if error_msg
+                    else f'HTTP {put_resp.status_code}'}
+        except Exception as e:
+            return {'error': f'PUT failed: {e}'}
+
+    # ── EWM: defect creation ──────────────────────────────────
+
+    def create_defect(self, service_provider_url: str, title: str,
+                      description: str = '', severity: Optional[str] = None,
+                      requirement_url: Optional[str] = None,
+                      test_case_url: Optional[str] = None) -> Dict:
+        """Create a Defect work item in EWM.
+
+        Resolves:
+          - the Defect creation factory from services.xml,
+          - the `filedAgainst` category default from the defect resource shape,
+          - severity URI from the project's severity enumeration (if name given).
+
+        Optionally cross-links to a DNG requirement (oslc_cm:affectedByDefect /
+        calm:tracksRequirement) or to an ETM test case (oslc_cm:relatedTestCase).
+        """
+        self._ensure_auth()
+
+        # Find Defect creation factory and shape URL
+        try:
+            sp_resp = self.session.get(
+                service_provider_url,
+                headers={'Accept': 'application/rdf+xml', 'OSLC-Core-Version': '2.0'},
+                timeout=self._TIMEOUT,
+            )
+            if sp_resp.status_code != 200:
+                return {'error': f'Could not load service provider: HTTP {sp_resp.status_code}'}
+            sproot = ET.fromstring(sp_resp.content)
+        except Exception as e:
+            return {'error': f'Service provider fetch failed: {e}'}
+
+        ns = self._NS_OSLC
+        creation_url = ''
+        shape_url = ''
+        for cf in sproot.findall('.//oslc:CreationFactory', ns):
+            title_el = cf.find('dcterms:title', ns)
+            t = (title_el.text or '').lower() if title_el is not None else ''
+            if 'defect' not in t:
+                continue
+            cr = cf.find('oslc:creation', ns)
+            sh = cf.find('oslc:resourceShape', ns)
+            if cr is not None:
+                creation_url = cr.get(f'{{{ns["rdf"]}}}resource', '')
+            if sh is not None:
+                shape_url = sh.get(f'{{{ns["rdf"]}}}resource', '')
+            if creation_url:
+                break
+
+        if not creation_url:
+            return {'error': 'Defect creation factory not found.'}
+
+        # Read filedAgainst from the defect shape.
+        # Strategy: collect both the default value (often "Unassigned" — many
+        # process configs reject Unassigned for defects) and the full
+        # AllowedValues list. Prefer the first non-Unassigned, non-default
+        # category; only fall back to default if that's all there is.
+        filed_against_url = ''
+        shape_resp = None
+        sroot = None
+        if shape_url:
+            try:
+                shape_resp = self.session.get(
+                    shape_url,
+                    headers={'Accept': 'application/rdf+xml', 'OSLC-Core-Version': '2.0'},
+                    timeout=self._TIMEOUT,
+                )
+                if shape_resp.status_code == 200:
+                    sroot = ET.fromstring(shape_resp.content)
+                    candidates = list(sroot.iter(f'{{{ns["oslc"]}}}Property')) + \
+                                 list(sroot.findall(f'{{{ns["rdf"]}}}Description'))
+                    default_val = ''
+                    allowed_values_url = ''
+                    for prop in candidates:
+                        pdef = prop.find(f'{{{ns["oslc"]}}}propertyDefinition')
+                        if pdef is None:
+                            continue
+                        pu = pdef.get(f'{{{ns["rdf"]}}}resource', '')
+                        if pu.endswith('filedAgainst'):
+                            dv = prop.find(f'{{{ns["oslc"]}}}defaultValue')
+                            if dv is not None:
+                                default_val = dv.get(f'{{{ns["rdf"]}}}resource', '')
+                            av = prop.find(f'{{{ns["oslc"]}}}allowedValues')
+                            if av is not None:
+                                allowed_values_url = av.get(f'{{{ns["rdf"]}}}resource', '')
+                            break
+                    # Fetch allowed-values, pick first non-default category
+                    chosen = ''
+                    if allowed_values_url:
+                        try:
+                            av_resp = self.session.get(
+                                allowed_values_url,
+                                headers={'Accept': 'application/rdf+xml',
+                                         'OSLC-Core-Version': '2.0'},
+                                timeout=self._TIMEOUT,
+                            )
+                            if av_resp.status_code == 200:
+                                av_root = ET.fromstring(av_resp.content)
+                                for av_el in av_root.iter(f'{{{ns["oslc"]}}}allowedValue'):
+                                    cat_url = av_el.get(f'{{{ns["rdf"]}}}resource', '')
+                                    if cat_url and cat_url != default_val:
+                                        chosen = cat_url
+                                        break
+                        except Exception:
+                            pass
+                    filed_against_url = chosen or default_val
+            except Exception:
+                pass
+
+        # Resolve severity URI if friendly name given
+        severity_uri = ''
+        if severity:
+            sev_lower = severity.strip().lower()
+            if sev_lower.startswith('http'):
+                severity_uri = severity
+            elif shape_url and sroot is not None:
+                # Locate severity property → range URI for enumeration
+                enum_url = ''
+                candidates2 = list(sroot.iter(f'{{{ns["oslc"]}}}Property')) + \
+                              list(sroot.findall(f'{{{ns["rdf"]}}}Description'))
+                for prop in candidates2:
+                    pdef = prop.find(f'{{{ns["oslc"]}}}propertyDefinition')
+                    if pdef is None:
+                        continue
+                    if pdef.get(f'{{{ns["rdf"]}}}resource', '').endswith('severity'):
+                        rng = prop.find(f'{{{ns["oslc"]}}}range')
+                        if rng is not None:
+                            enum_url = rng.get(f'{{{ns["rdf"]}}}resource', '')
+                            if enum_url:
+                                break
+                if enum_url:
+                    try:
+                        enum_resp = self.session.get(
+                            enum_url,
+                            headers={'Accept': 'application/rdf+xml',
+                                     'OSLC-Core-Version': '2.0'},
+                            timeout=self._TIMEOUT,
+                        )
+                        if enum_resp.status_code == 200:
+                            eroot = ET.fromstring(enum_resp.content)
+                            ns_dct = 'http://purl.org/dc/terms/'
+                            for desc in eroot.findall(f'{{{ns["rdf"]}}}Description'):
+                                t_el = desc.find(f'{{{ns_dct}}}title')
+                                if t_el is None or not t_el.text:
+                                    continue
+                                if t_el.text.strip().lower() == sev_lower:
+                                    severity_uri = desc.get(f'{{{ns["rdf"]}}}about', '')
+                                    break
+                    except Exception:
+                        pass
+
+        prefixed_title = f"[AI Generated] {title}" if not title.startswith("[AI Generated]") else title
+        desc_body = f"[AI Generated]\n\n{description}" if description else "[AI Generated]"
+
+        # Build extra triples
+        extras = []
+        if filed_against_url:
+            extras.append(f'<rtc_cm:filedAgainst rdf:resource="{filed_against_url}"/>')
+        if severity_uri:
+            extras.append(f'<oslc_cmx:severity rdf:resource="{severity_uri}"/>')
+        if requirement_url:
+            extras.append(f'<calm:affectedByDefect rdf:resource="{requirement_url}"/>')
+        if test_case_url:
+            extras.append(f'<oslc_cm:relatedTestCase rdf:resource="{test_case_url}"/>')
+
+        rdf = f'''<?xml version="1.0" encoding="UTF-8"?>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+         xmlns:dcterms="http://purl.org/dc/terms/"
+         xmlns:oslc_cm="http://open-services.net/ns/cm#"
+         xmlns:oslc_cmx="http://open-services.net/ns/cm-x#"
+         xmlns:rtc_cm="http://jazz.net/xmlns/prod/jazz/rtc/cm/1.0/"
+         xmlns:calm="http://jazz.net/xmlns/prod/jazz/calm/1.0/">
+  <rdf:Description>
+    <dcterms:title>{self._escape_xml(prefixed_title)}</dcterms:title>
+    <dcterms:description>{self._escape_xml(desc_body)}</dcterms:description>
+    {''.join('    ' + e + chr(10) for e in extras)}
+  </rdf:Description>
+</rdf:RDF>'''
+
+        try:
+            resp = self.session.post(
+                creation_url,
+                data=rdf.encode('utf-8'),
+                headers={
+                    'Content-Type': 'application/rdf+xml',
+                    'Accept': 'application/rdf+xml',
+                    'OSLC-Core-Version': '2.0',
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+                timeout=self._TIMEOUT,
+            )
+            if resp.status_code in [200, 201]:
+                return {'title': prefixed_title, 'url': resp.headers.get('Location', '')}
+            error_msg = self._extract_oslc_error(resp.text)
+            return {'error': f"HTTP {resp.status_code}: {error_msg}" if error_msg
+                    else f"HTTP {resp.status_code}"}
+        except Exception as e:
+            return {'error': str(e)}
+
+    # ── SCM (Jazz SCM, read-only) ──────────────────────────────
+
+    def scm_list_projects(self) -> List[Dict]:
+        """List SCM service-providers from /ccm/oslc-scm/catalog (note hyphen).
+
+        Returns: list of {name, projectAreaId, providerUrl}.
+        """
+        self._ensure_auth()
+        try:
+            resp = self.session.get(
+                f"{self.ccm_url}/oslc-scm/catalog",
+                headers={
+                    'Accept': 'application/rdf+xml',
+                    'OSLC-Core-Version': '2.0',
+                },
+                timeout=self._TIMEOUT,
+            )
+            if resp.status_code != 200:
+                return []
+            root = ET.fromstring(resp.content)
+        except Exception:
+            return []
+
+        ns = self._NS_OSLC
+        out: List[Dict] = []
+        for sp in root.findall('.//oslc:ServiceProvider', ns):
+            about = sp.get(f'{{{ns["rdf"]}}}about', '')
+            title_el = sp.find('dcterms:title', ns)
+            name = title_el.text.strip() if title_el is not None and title_el.text else ''
+            pa_id = ''
+            if '/project-area/' in about:
+                pa_id = about.rstrip('/').split('/project-area/')[-1]
+            out.append({
+                'name': name,
+                'projectAreaId': pa_id,
+                'providerUrl': about,
+            })
+        return out
+
+    def _scm_paged_changeset_uris(self, limit: int = 25) -> List[str]:
+        """Walk TRS pages until we have at least `limit` change-set URIs."""
+        uris: List[str] = []
+        page_url = f"{self.ccm_url}/rtcoslc/scm/reportable/trs/cs"
+        ns_trs = 'http://open-services.net/ns/core/trs#'
+        ns_rdf = self._NS_OSLC['rdf']
+        seen = 0
+        while page_url and seen < 25 and len(uris) < limit:
+            try:
+                resp = self.session.get(
+                    page_url,
+                    headers={
+                        'Accept': 'application/rdf+xml',
+                        'OSLC-Core-Version': '2.0',
+                    },
+                    timeout=self._TIMEOUT,
+                )
+                if resp.status_code != 200:
+                    break
+                root = ET.fromstring(resp.content)
+            except Exception:
+                break
+            for changed in root.iter(f'{{{ns_trs}}}changed'):
+                u = changed.get(f'{{{ns_rdf}}}resource', '')
+                if u and u not in uris:
+                    uris.append(u)
+                    if len(uris) >= limit:
+                        return uris
+            # find <trs:previous>
+            prev_el = root.find(f'.//{{{ns_trs}}}previous')
+            page_url = prev_el.get(f'{{{ns_rdf}}}resource', '') if prev_el is not None else ''
+            seen += 1
+        return uris
+
+    def _scm_workitems_for_changeset(self, cs_oid_url: str) -> List[Dict]:
+        """Walk the cslink TRS for a given change-set's canonical OID URL,
+        return [{workItemId, url}] for any that link to it.
+
+        This is best-effort and only checks the first page of cslink TRS
+        unless we discover the change-set OID quickly.
+        """
+        out: List[Dict] = []
+        page_url = f"{self.ccm_url}/rtcoslc/scm/cslink/trs"
+        ns_trs = 'http://open-services.net/ns/core/trs#'
+        ns_rdf = self._NS_OSLC['rdf']
+        ns_cm = 'http://open-services.net/ns/cm#'
+
+        link_resources: List[str] = []
+        try:
+            resp = self.session.get(
+                page_url,
+                headers={'Accept': 'application/rdf+xml', 'OSLC-Core-Version': '2.0'},
+                timeout=self._TIMEOUT,
+            )
+            if resp.status_code == 200:
+                root = ET.fromstring(resp.content)
+                for changed in root.iter(f'{{{ns_trs}}}changed'):
+                    link_resources.append(changed.get(f'{{{ns_rdf}}}resource', ''))
+        except Exception:
+            return out
+
+        # For each cslink resource, GET it and see if it points to our CS.
+        for lr in link_resources[:25]:  # cap to avoid runaway
+            if not lr:
+                continue
+            try:
+                lr_resp = self.session.get(
+                    lr,
+                    headers={'Accept': 'application/rdf+xml', 'OSLC-Core-Version': '2.0'},
+                    timeout=15,
+                )
+                if lr_resp.status_code != 200:
+                    continue
+                lroot = ET.fromstring(lr_resp.content)
+            except Exception:
+                continue
+            for desc in lroot.findall(f'{{{ns_rdf}}}Description'):
+                wi = desc.get(f'{{{ns_rdf}}}about', '')
+                tracks = desc.find(f'{{{ns_cm}}}tracksChangeSet')
+                if tracks is None:
+                    continue
+                if tracks.get(f'{{{ns_rdf}}}resource', '') == cs_oid_url:
+                    wi_id = ''
+                    if '/WorkItem/' in wi:
+                        wi_id = wi.rstrip('/').split('/')[-1]
+                    out.append({'workItemId': wi_id, 'url': wi})
+        return out
+
+    def scm_list_changesets(self, project_name: Optional[str] = None,
+                            limit: int = 25) -> List[Dict]:
+        """List recent change-sets via the SCM TRS feed.
+
+        Walks `/ccm/rtcoslc/scm/reportable/trs/cs` (paginated by
+        <trs:previous>), GETs each change-set RDF for metadata, and (if
+        a project name is given) filters by `process:projectArea` title
+        match.
+
+        TRS feeds only ship the most recent ~5 changes per page; this
+        method walks at most ~25 pages.
+
+        Returns [{itemId, title, component, author, modified, totalChanges,
+                  workItems[], url}].
+        """
+        self._ensure_auth()
+
+        # Map project name → projectArea URL (so we can filter)
+        target_pa_url = ''
+        if project_name:
+            projects = self.scm_list_projects()
+            for p in projects:
+                if project_name.lower() in p['name'].lower():
+                    # Build process:projectArea URL: /ccm/process/project-areas/<paId>
+                    target_pa_url = f"{self.ccm_url}/process/project-areas/{p['projectAreaId']}"
+                    break
+
+        cs_uris = self._scm_paged_changeset_uris(limit=limit * 4 if project_name else limit)
+
+        ns_dct = 'http://purl.org/dc/terms/'
+        ns_rdf = self._NS_OSLC['rdf']
+        ns_scm = 'http://jazz.net/ns/scm#'
+        ns_proc = 'http://jazz.net/ns/process#'
+
+        out: List[Dict] = []
+        for uri in cs_uris:
+            if len(out) >= limit:
+                break
+            try:
+                resp = self.session.get(
+                    uri,
+                    headers={'Accept': 'application/rdf+xml', 'OSLC-Core-Version': '2.0'},
+                    timeout=15,
+                )
+                if resp.status_code != 200:
+                    continue
+                root = ET.fromstring(resp.content)
+            except Exception:
+                continue
+
+            cs_el = root.find(f'{{{ns_scm}}}ChangeSet')
+            if cs_el is None:
+                continue
+            cs_about = cs_el.get(f'{{{ns_rdf}}}about', '')
+
+            pa_el = cs_el.find(f'{{{ns_proc}}}projectArea')
+            pa_url = pa_el.get(f'{{{ns_rdf}}}resource', '') if pa_el is not None else ''
+            if target_pa_url and pa_url != target_pa_url:
+                continue
+
+            ident = cs_el.find(f'{{{ns_dct}}}identifier')
+            title = cs_el.find(f'{{{ns_dct}}}title')
+            comp = cs_el.find(f'{{{ns_scm}}}component')
+            contrib = cs_el.find(f'{{{ns_dct}}}contributor')
+            modified = cs_el.find(f'{{{ns_dct}}}modified')
+            total = cs_el.find(f'{{{ns_scm}}}totalChanges')
+
+            cs_id = (ident.text.strip() if ident is not None and ident.text else
+                     uri.rstrip('/').split('/')[-1])
+            cs_oid_url = f"{self.ccm_url}/resource/itemOid/com.ibm.team.scm.ChangeSet/{cs_id}"
+
+            out.append({
+                'itemId': cs_id,
+                'title': title.text.strip() if title is not None and title.text else '',
+                'component': comp.text.strip() if comp is not None and comp.text else '',
+                'author': contrib.get(f'{{{ns_rdf}}}resource', '') if contrib is not None else '',
+                'modified': modified.text.strip() if modified is not None and modified.text else '',
+                'totalChanges': int(total.text) if total is not None and total.text and total.text.isdigit() else 0,
+                'workItems': self._scm_workitems_for_changeset(cs_oid_url),
+                'url': cs_about,
+                'projectArea': pa_url,
+            })
+        return out
+
+    def scm_get_changeset(self, changeset_id: str) -> Dict:
+        """Fetch a single change-set by its `_xxx` itemId.
+
+        GET both:
+          - /ccm/rtcoslc/scm/reportable/cs/<id>  (reportable RDF)
+          - /ccm/resource/itemOid/com.ibm.team.scm.ChangeSet/<id> (canonical)
+
+        Returns {itemId, title, component, author, modified, totalChanges,
+                 workItems[], reportable_url, canonical_url, rawRDF}.
+        """
+        self._ensure_auth()
+        cs_id = changeset_id.strip()
+        if not cs_id.startswith('_'):
+            cs_id = '_' + cs_id
+
+        rep_url = f"{self.ccm_url}/rtcoslc/scm/reportable/cs/{cs_id}"
+        canon_url = f"{self.ccm_url}/resource/itemOid/com.ibm.team.scm.ChangeSet/{cs_id}"
+        try:
+            resp = self.session.get(
+                rep_url,
+                headers={'Accept': 'application/rdf+xml', 'OSLC-Core-Version': '2.0'},
+                timeout=self._TIMEOUT,
+            )
+            if resp.status_code != 200:
+                return {'error': f'HTTP {resp.status_code} on reportable URL'}
+            root = ET.fromstring(resp.content)
+        except Exception as e:
+            return {'error': str(e)}
+
+        ns_dct = 'http://purl.org/dc/terms/'
+        ns_rdf = self._NS_OSLC['rdf']
+        ns_scm = 'http://jazz.net/ns/scm#'
+        ns_proc = 'http://jazz.net/ns/process#'
+
+        cs_el = root.find(f'{{{ns_scm}}}ChangeSet')
+        if cs_el is None:
+            return {'error': 'No scm:ChangeSet element found in response.'}
+
+        ident = cs_el.find(f'{{{ns_dct}}}identifier')
+        title = cs_el.find(f'{{{ns_dct}}}title')
+        comp = cs_el.find(f'{{{ns_scm}}}component')
+        contrib = cs_el.find(f'{{{ns_dct}}}contributor')
+        modified = cs_el.find(f'{{{ns_dct}}}modified')
+        total = cs_el.find(f'{{{ns_scm}}}totalChanges')
+        pa_el = cs_el.find(f'{{{ns_proc}}}projectArea')
+
+        return {
+            'itemId': ident.text.strip() if ident is not None and ident.text else cs_id,
+            'title': title.text.strip() if title is not None and title.text else '',
+            'component': comp.text.strip() if comp is not None and comp.text else '',
+            'author': contrib.get(f'{{{ns_rdf}}}resource', '') if contrib is not None else '',
+            'modified': modified.text.strip() if modified is not None and modified.text else '',
+            'totalChanges': int(total.text) if total is not None and total.text and total.text.isdigit() else 0,
+            'projectArea': pa_el.get(f'{{{ns_rdf}}}resource', '') if pa_el is not None else '',
+            'reportable_url': rep_url,
+            'canonical_url': canon_url,
+            'workItems': self._scm_workitems_for_changeset(canon_url),
+            'rawRDF': resp.content.decode('utf-8'),
+        }
+
+    def scm_get_workitem_changesets(self, workitem_id: str) -> List[Dict]:
+        """List change-sets attached to a work item.
+
+        GETs `/ccm/resource/itemName/com.ibm.team.workitem.WorkItem/<id>`
+        and parses the `rtc_cm:com.ibm.team.filesystem.workitems.change_set.com.ibm.team.scm.ChangeSet`
+        triples (full RDF predicate).
+
+        Returns [{changeSetId, title, url}].  Empty list if the WI has
+        no SCM links (which is fine — every WI has the shape).
+        """
+        self._ensure_auth()
+        wi_id = workitem_id.strip()
+        url = f"{self.ccm_url}/resource/itemName/com.ibm.team.workitem.WorkItem/{wi_id}"
+        try:
+            resp = self.session.get(
+                url,
+                headers={
+                    'Accept': 'application/rdf+xml',
+                    'OSLC-Core-Version': '2.0',
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+                timeout=self._TIMEOUT,
+            )
+            if resp.status_code != 200:
+                return []
+            root = ET.fromstring(resp.content)
+        except Exception:
+            return []
+
+        ns_dct = 'http://purl.org/dc/terms/'
+        ns_rdf = self._NS_OSLC['rdf']
+        cs_pred = '{http://jazz.net/xmlns/prod/jazz/rtc/cm/1.0/}com.ibm.team.filesystem.workitems.change_set.com.ibm.team.scm.ChangeSet'
+
+        # Build map of CS-URL → reified-statement title (from rdf:Statement nodeIDs)
+        title_map: Dict[str, str] = {}
+        for desc in root.findall(f'{{{ns_rdf}}}Description'):
+            obj_el = desc.find(f'{{{ns_rdf}}}object')
+            pred_el = desc.find(f'{{{ns_rdf}}}predicate')
+            t_el = desc.find(f'{{{ns_dct}}}title')
+            if obj_el is None or pred_el is None or t_el is None:
+                continue
+            pu = pred_el.get(f'{{{ns_rdf}}}resource', '')
+            ou = obj_el.get(f'{{{ns_rdf}}}resource', '')
+            if 'change_set.com.ibm.team.scm.ChangeSet' in pu and ou and t_el.text:
+                title_map[ou] = t_el.text.strip()
+
+        out: List[Dict] = []
+        seen = set()
+        for desc in root.findall(f'{{{ns_rdf}}}Description'):
+            for cs_link in desc.findall(cs_pred):
+                cs_url = cs_link.get(f'{{{ns_rdf}}}resource', '')
+                if not cs_url or cs_url in seen:
+                    continue
+                seen.add(cs_url)
+                cs_id = cs_url.rstrip('/').split('/')[-1]
+                out.append({
+                    'changeSetId': cs_id,
+                    'title': title_map.get(cs_url, ''),
+                    'url': cs_url,
+                })
+        return out
+
+    # ── EWM Reviews / Approvals ───────────────────────────────
+
+    def review_get(self, workitem_id: str) -> Dict:
+        """Fetch review-relevant fields from a work item.
+
+        Returns:
+          {title, state, type, approved, reviewed,
+           approvals: [{approver, descriptor, stateName, stateIdentifier}],
+           changeSets: [{changeSetId, title, url}],
+           comments_url}
+
+        Approvals are read from the work-item's `rtc_cm:approvals` (when
+        embedded in the RDF). On servers where approvals are out-of-line,
+        we fall back to the workitems/approvals collection.
+        """
+        self._ensure_auth()
+        wi_id = workitem_id.strip()
+        url = f"{self.ccm_url}/resource/itemName/com.ibm.team.workitem.WorkItem/{wi_id}"
+        try:
+            resp = self.session.get(
+                url,
+                headers={
+                    'Accept': 'application/rdf+xml',
+                    'OSLC-Core-Version': '2.0',
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+                timeout=self._TIMEOUT,
+            )
+            if resp.status_code != 200:
+                return {'error': f'HTTP {resp.status_code}'}
+            root = ET.fromstring(resp.content)
+        except Exception as e:
+            return {'error': str(e)}
+
+        ns_dct = 'http://purl.org/dc/terms/'
+        ns_rdf = self._NS_OSLC['rdf']
+        ns_oslc_cm = 'http://open-services.net/ns/cm#'
+        ns_rtc = 'http://jazz.net/xmlns/prod/jazz/rtc/cm/1.0/'
+        ns_oslc = 'http://open-services.net/ns/core#'
+
+        title = ''
+        state = ''
+        wi_type = ''
+        approved = None
+        reviewed = None
+        comments_url = ''
+        for desc in root.findall(f'{{{ns_rdf}}}Description'):
+            about = desc.get(f'{{{ns_rdf}}}about', '')
+            if about != url:
+                continue
+            t_el = desc.find(f'{{{ns_dct}}}title')
+            if t_el is not None and t_el.text:
+                title = t_el.text.strip()
+            state_el = desc.find(f'{{{ns_rtc}}}state')
+            if state_el is not None:
+                state = state_el.get(f'{{{ns_rdf}}}resource', '')
+            type_el = desc.find(f'{{{ns_rtc}}}type')
+            if type_el is not None:
+                wi_type = type_el.get(f'{{{ns_rdf}}}resource', '')
+            ap_el = desc.find(f'{{{ns_oslc_cm}}}approved')
+            if ap_el is not None and ap_el.text:
+                approved = ap_el.text.strip().lower() == 'true'
+            rv_el = desc.find(f'{{{ns_oslc_cm}}}reviewed')
+            if rv_el is not None and rv_el.text:
+                reviewed = rv_el.text.strip().lower() == 'true'
+            disc_el = desc.find(f'{{{ns_oslc}}}discussedBy')
+            if disc_el is not None:
+                comments_url = disc_el.get(f'{{{ns_rdf}}}resource', '')
+
+        # Walk for change-sets via the same logic as scm_get_workitem_changesets
+        cs_pred = f'{{{ns_rtc}}}com.ibm.team.filesystem.workitems.change_set.com.ibm.team.scm.ChangeSet'
+        change_sets: List[Dict] = []
+        seen = set()
+        for desc in root.findall(f'{{{ns_rdf}}}Description'):
+            for cs_link in desc.findall(cs_pred):
+                cs_url = cs_link.get(f'{{{ns_rdf}}}resource', '')
+                if not cs_url or cs_url in seen:
+                    continue
+                seen.add(cs_url)
+                change_sets.append({
+                    'changeSetId': cs_url.rstrip('/').split('/')[-1],
+                    'title': '',
+                    'url': cs_url,
+                })
+
+        # Approvals: try inline <rtc_cm:approvals> first
+        approvals: List[Dict] = []
+        approvals_pred = f'{{{ns_rtc}}}approvals'
+        for desc in root.findall(f'{{{ns_rdf}}}Description'):
+            for ap_block in desc.findall(approvals_pred):
+                # Inline blank node or referenced
+                for ap_node in ap_block:
+                    rec = self._parse_approval_node(ap_node, ns_rdf, ns_dct, ns_rtc)
+                    if rec:
+                        approvals.append(rec)
+
+        return {
+            'workItemId': wi_id,
+            'workItemUrl': url,
+            'title': title,
+            'state': state,
+            'type': wi_type,
+            'approved': approved,
+            'reviewed': reviewed,
+            'approvals': approvals,
+            'changeSets': change_sets,
+            'comments_url': comments_url,
+        }
+
+    def _parse_approval_node(self, ap_node, ns_rdf, ns_dct, ns_rtc) -> Optional[Dict]:
+        """Helper: parse a single approval node (per scm_05_wi_schema.xml shape).
+
+        Looks for: dcterms:title (descriptor), rtc_cm:approver/contributor,
+        rtc_cm:stateName / state identifier.
+        """
+        try:
+            descriptor = ''
+            t_el = ap_node.find(f'{{{ns_dct}}}title')
+            if t_el is not None and t_el.text:
+                descriptor = t_el.text.strip()
+            approver = ''
+            for a_tag in ('approver', 'contributor', 'creator'):
+                a_el = ap_node.find(f'{{{ns_rtc}}}{a_tag}') or ap_node.find(f'{{{ns_dct}}}{a_tag}')
+                if a_el is not None:
+                    approver = a_el.get(f'{{{ns_rdf}}}resource', '')
+                    if approver:
+                        break
+            state_name = ''
+            state_id = ''
+            sn_el = ap_node.find(f'{{{ns_rtc}}}stateName')
+            if sn_el is not None and sn_el.text:
+                state_name = sn_el.text.strip()
+            si_el = ap_node.find(f'{{{ns_rtc}}}stateIdentifier')
+            if si_el is not None and si_el.text:
+                state_id = si_el.text.strip()
+            if not (descriptor or approver or state_name):
+                return None
+            return {
+                'approver': approver,
+                'descriptor': descriptor,
+                'stateName': state_name,
+                'stateIdentifier': state_id,
+            }
+        except Exception:
+            return None
+
+    def review_list_open(self, ewm_project_url: str) -> List[Dict]:
+        """List open review work items for an EWM project.
+
+        Runs the OSLC CM query:
+            oslc.where=rtc_cm:type="com.ibm.team.review.workItemType.review"
+                       and oslc_cm:closed=false
+        against the project's workitems query base.
+
+        Returns [{workItemId, title, type, state, url}]. Empty list if
+        the project has no review-typed WIs (which is the case on this
+        sandbox — that's expected).
+        """
+        # Reuse query_work_items but with the review type filter.
+        where = ('rtc_cm:type="com.ibm.team.review.workItemType.review"'
+                 ' and oslc_cm:closed=false')
+        items = self.query_work_items(
+            ewm_project_url=ewm_project_url,
+            where=where,
+            select='dcterms:title,dcterms:identifier,rtc_cm:type,rtc_cm:state,oslc_cm:closed',
+            page_size=100,
+        )
+        return items
 
     # ── Export ─────────────────────────────────────────────────
 

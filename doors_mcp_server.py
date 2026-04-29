@@ -2,29 +2,46 @@
 """
 DOORS Next AI Agent — MCP Server
 Provides tools for AI assistants to interact with IBM Engineering Lifecycle Management (ELM)
-Covers DNG (requirements), EWM (work items), and ETM (test management)
+Covers DNG (requirements), EWM (work items), ETM (test management), and SCM (change-sets).
 
-Tools (20):
-  1.  connect_to_elm              - Connect with credentials
-  2.  list_projects               - List DNG/EWM/ETM projects (domain parameter)
-  3.  get_modules                 - Get modules from a DNG project
-  4.  get_module_requirements     - Get requirements from a module
-  5.  save_requirements           - Save requirements to a file (JSON/CSV/Markdown)
-  6.  search_requirements         - Full-text search across all artifacts in a project
-  7.  get_artifact_types          - Discover artifact types for a DNG project
-  8.  get_link_types              - Discover link types for a DNG project
-  9.  create_requirements         - Create requirements with links in a descriptive folder
-  10. update_requirement          - Update an existing requirement's title and/or content
-  11. create_baseline             - Create a baseline snapshot of a DNG project
-  12. list_baselines              - List existing baselines for a DNG project
-  13. compare_baselines           - Compare baseline vs current stream (shows diff)
-  14. extract_pdf                 - Extract text from a PDF file for import into DNG
-  15. create_task                 - Create an EWM Task with optional DNG requirement link
-  16. create_test_case            - Create an ETM Test Case with optional DNG requirement link
-  17. create_test_result          - Create an ETM Test Result (pass/fail) for a test case
-  18. list_global_configurations  - List all global configs (streams/baselines) from GCM
-  19. list_global_components      - List all components across DNG/EWM/ETM from GCM
-  20. get_global_config_details   - Get details + contributions for a global configuration
+Tools (33):
+  Existing (21):
+    1.  connect_to_elm              - Connect with credentials
+    2.  list_projects               - List DNG/EWM/ETM projects (domain parameter)
+    3.  get_modules                 - Get modules from a DNG project
+    4.  get_module_requirements     - Get requirements from a module
+    5.  save_requirements           - Save requirements to a file (JSON/CSV/Markdown)
+    6.  search_requirements         - Full-text search across all artifacts in a project
+    7.  get_artifact_types          - Discover artifact types for a DNG project
+    8.  get_link_types              - Discover link types for a DNG project
+    9.  create_requirements         - Create requirements with links in a descriptive folder
+   10. update_requirement          - Update an existing requirement's title and/or content
+   11. create_baseline             - Create a baseline snapshot of a DNG project
+   12. list_baselines              - List existing baselines for a DNG project
+   13. compare_baselines           - Compare baseline vs current stream (shows diff)
+   14. extract_pdf                 - Extract text from a PDF file for import into DNG
+   15. create_task                 - Create an EWM Task with optional DNG requirement link
+   16. create_test_case            - Create an ETM Test Case with optional DNG requirement link
+   17. create_test_result          - Create an ETM Test Result (pass/fail) for a test case
+   18. list_global_configurations  - List all global configs (streams/baselines) from GCM
+   19. list_global_components      - List all components across DNG/EWM/ETM from GCM
+   20. get_global_config_details   - Get details + contributions for a global configuration
+   21. generate_chart              - Render a bar/hbar/pie/line chart as PNG (visualize ELM data)
+
+  New (12 — OSLC + SCM/Reviews):
+   22. get_attribute_definitions   - Discover DNG attribute predicates + allowed enum values
+   23. update_requirement_attributes - Set arbitrary DNG attributes (Status, Priority, etc.)
+   24. update_work_item            - PUT-with-If-Match arbitrary fields on an EWM WI
+   25. transition_work_item        - Move WI through workflow via _action= query param
+   26. query_work_items            - OSLC CM query (oslc.where / oslc.select)
+   27. create_link                 - Generic OSLC link between two existing artifacts
+   28. create_defect               - Create EWM Defect (auto-resolves filedAgainst category)
+   29. scm_list_projects           - SCM service-providers from /ccm/oslc-scm/catalog
+   30. scm_list_changesets         - Recent change-sets via TRS feed
+   31. scm_get_changeset           - Single change-set + linked work items
+   32. scm_get_workitem_changesets - Change-sets on a given WI
+   33. review_get                  - Review-relevant WI fields (approvals, change-sets, etc.)
+   34. review_list_open            - Open review-typed WIs in a project
 """
 
 import os
@@ -591,11 +608,41 @@ async def list_tools() -> list[Tool]:
             }
         ),
         Tool(
+            name="create_module",
+            description=(
+                "Create a new DOORS Next module (a navigable document that holds requirements). "
+                "Use this when the user wants a fresh module to house requirements. "
+                "After creating the module, call create_requirements with module_name set "
+                "to bind requirements into it. Returns the module URL."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "project_identifier": {
+                        "type": "string",
+                        "description": "DNG project number or name"
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Module title (will be prefixed with [AI Generated] if not already)"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Optional module description"
+                    }
+                },
+                "required": ["project_identifier", "title"]
+            }
+        ),
+        Tool(
             name="create_requirements",
             description=(
-                "Create requirements in a DOORS Next project. "
+                "Create requirements in a DOORS Next project AND bind them to a module so they "
+                "appear in DNG's module/document view. STRONGLY PREFER providing module_name — "
+                "module_name is what makes requirements visible as a navigable document; folder-only "
+                "requirements (no module_name) end up as orphan artifacts most users can't find. "
                 "MUST call get_artifact_types first to get valid type names for this project. "
-                "Requirements are placed in a descriptive folder with [AI Generated] prefix auto-added. "
+                "[AI Generated] prefix is auto-added to titles. "
                 "Returns created requirement URLs needed by create_task and create_test_case."
             ),
             inputSchema={
@@ -605,9 +652,13 @@ async def list_tools() -> list[Tool]:
                         "type": "string",
                         "description": "Project number or name"
                     },
+                    "module_name": {
+                        "type": "string",
+                        "description": "Module name to bind requirements into. If a module with this name exists it's reused; otherwise it's created. STRONGLY RECOMMENDED — without it, requirements are orphans in a folder."
+                    },
                     "folder_name": {
                         "type": "string",
-                        "description": "Descriptive folder name. Format: 'AI Generated - [username] - [summary]' (e.g., 'AI Generated - brett.scharmett - Security Requirements')"
+                        "description": "Optional folder for the underlying base artifacts (DNG stores every artifact in a folder, even module-bound ones). Defaults to a folder named after the module. Format suggestion: 'AI Generated - [user] - [topic]'."
                     },
                     "requirements": {
                         "type": "array",
@@ -640,7 +691,7 @@ async def list_tools() -> list[Tool]:
                         }
                     }
                 },
-                "required": ["project_identifier", "folder_name", "requirements"]
+                "required": ["project_identifier", "requirements"]
             }
         ),
         Tool(
@@ -953,6 +1004,372 @@ async def list_tools() -> list[Tool]:
                 "required": ["config_url"]
             }
         ),
+        Tool(
+            name="generate_chart",
+            description=(
+                "Generate a chart (bar, horizontal bar, pie, or line) from data and save it as a PNG. "
+                "Use this to visualize ELM data — e.g., requirements by status, test results pass/fail, "
+                "tasks by priority, requirements per module. The host LLM should aggregate the data first "
+                "(from get_module_requirements, search_requirements, etc.), then call this tool with the "
+                "summary numbers. Returns the absolute path to the saved PNG."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "chart_type": {
+                        "type": "string",
+                        "enum": ["bar", "hbar", "pie", "line"],
+                        "description": "Chart type: 'bar' (vertical), 'hbar' (horizontal — best for long category names), 'pie', or 'line'"
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Chart title shown at the top"
+                    },
+                    "labels": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Category labels (x-axis for bar/line, slice labels for pie)"
+                    },
+                    "values": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Numeric values, one per label (same length as labels)"
+                    },
+                    "x_label": {
+                        "type": "string",
+                        "description": "X-axis label (ignored for pie). Optional."
+                    },
+                    "y_label": {
+                        "type": "string",
+                        "description": "Y-axis label (ignored for pie). Optional."
+                    },
+                    "output_filename": {
+                        "type": "string",
+                        "description": "Output filename (no path, no extension). Optional — auto-generated from title + timestamp if omitted."
+                    }
+                },
+                "required": ["chart_type", "title", "labels", "values"]
+            }
+        ),
+        # ── DNG: arbitrary attribute updates ────────────────────
+        Tool(
+            name="get_attribute_definitions",
+            description=(
+                "List all DNG attribute property definitions for a project — name, "
+                "predicate URI, value type, and (for enums) allowed values. "
+                "Use this BEFORE update_requirement_attributes to see what attributes "
+                "exist on the project's artifact shapes (e.g. Priority, Status, Stability) "
+                "and what enum labels are valid. "
+                "Call list_projects with domain='dng' first to find the project."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "project_identifier": {
+                        "type": "string",
+                        "description": "DNG project number or name"
+                    }
+                },
+                "required": ["project_identifier"]
+            }
+        ),
+        Tool(
+            name="update_requirement_attributes",
+            description=(
+                "Set arbitrary DNG attributes on a requirement (e.g. Priority='High', "
+                "Status='Approved'). Uses optimistic locking (GET ETag → PUT If-Match). "
+                "Pass attribute keys by friendly name OR full predicate URI. For enum-valued "
+                "attributes, pass the human-readable label (resolved via the project's "
+                "shape definitions). Call get_attribute_definitions first to discover "
+                "valid attribute names and their allowed values. "
+                "NOTE: this tool updates standalone artifact attributes; module-bound "
+                "writes are restricted on this DNG server (see add_to_module)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "requirement_url": {
+                        "type": "string",
+                        "description": "Full URL of the requirement (from get_module_requirements / create_requirements)"
+                    },
+                    "attributes": {
+                        "type": "object",
+                        "description": "Dict mapping attribute name (e.g. 'Priority') or predicate URI to its new value (string literal, resource URI, or enum label like 'High')",
+                        "additionalProperties": True
+                    }
+                },
+                "required": ["requirement_url", "attributes"]
+            }
+        ),
+        # ── EWM: work-item operations ──────────────────────────
+        Tool(
+            name="update_work_item",
+            description=(
+                "Update arbitrary fields on an EWM work item via PUT-with-If-Match. "
+                "Friendly aliases: title, description, owner (user URI), severity / priority "
+                "(enum URIs), subject (tag list), filedAgainst (category URI). "
+                "Predicate URIs are also accepted. To change state, use transition_work_item."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "workitem_url": {
+                        "type": "string",
+                        "description": "Full work-item URL (e.g. .../resource/itemName/com.ibm.team.workitem.WorkItem/3583 — output from create_task)"
+                    },
+                    "fields": {
+                        "type": "object",
+                        "description": "Dict of {field_name: new_value}. Friendly names: title, description, owner, severity, priority, subject, filedAgainst. Resource-valued fields take URIs.",
+                        "additionalProperties": True
+                    }
+                },
+                "required": ["workitem_url", "fields"]
+            }
+        ),
+        Tool(
+            name="transition_work_item",
+            description=(
+                "Move an EWM work item through its workflow (e.g. New → In Development → Done). "
+                "Looks up the project's workflow actions and PUTs with `?_action=<actionId>`. "
+                "Pass `target_state` as a state title ('In Development', 'Done') or identifier. "
+                "On servers where multiple actions can reach the same state, the tool tries "
+                "ranked candidates until one succeeds — the response includes which action was used."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "workitem_url": {
+                        "type": "string",
+                        "description": "Full work-item URL (from create_task / query_work_items)"
+                    },
+                    "target_state": {
+                        "type": "string",
+                        "description": "Desired state name (e.g. 'In Development', 'Done', 'New')"
+                    }
+                },
+                "required": ["workitem_url", "target_state"]
+            }
+        ),
+        Tool(
+            name="query_work_items",
+            description=(
+                "Query EWM work items via OSLC CM. Use this to find work items matching "
+                "filters such as `oslc_cm:closed=false` or `dcterms:creator=\"<user-uri>\"`. "
+                "Supports OSLC where syntax. Resolves project name → project area, then "
+                "calls /ccm/oslc/contexts/<paId>/workitems?oslc.where=...&oslc.select=...&oslc.pageSize=N. "
+                "Use list_projects domain='ewm' to find the EWM project name."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "ewm_project": {
+                        "type": "string",
+                        "description": "EWM project number or name"
+                    },
+                    "where": {
+                        "type": "string",
+                        "description": "OSLC where clause (e.g. 'oslc_cm:closed=false', 'rtc_cm:type=\"...task\"')"
+                    },
+                    "select": {
+                        "type": "string",
+                        "description": "OSLC select clause (default '*')"
+                    },
+                    "page_size": {
+                        "type": "integer",
+                        "description": "Max items per page (default 25)"
+                    }
+                },
+                "required": ["ewm_project"]
+            }
+        ),
+        # ── Cross-domain link creation ─────────────────────────
+        Tool(
+            name="create_link",
+            description=(
+                "Create an OSLC link of any type between two existing artifacts. "
+                "Auto-detects source domain (DNG / EWM / ETM) from the URL prefix and uses "
+                "GET-ETag → PUT-If-Match on the source. Pass the source URL, the link type "
+                "URI (e.g. a Satisfies link from get_link_types, or http://open-services.net/ns/cm#implementsRequirement), "
+                "and the target URL. NOTE: DNG normalizes custom link-type predicates after PUT."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "source_url": {
+                        "type": "string",
+                        "description": "Full URL of the source artifact (DNG req, EWM workitem, or ETM resource)"
+                    },
+                    "link_type_uri": {
+                        "type": "string",
+                        "description": "Link-type URI — for DNG, a custom LT_ URL from get_link_types or a standard OSLC predicate (e.g. http://open-services.net/ns/rm#satisfies)"
+                    },
+                    "target_url": {
+                        "type": "string",
+                        "description": "Full URL of the target artifact"
+                    }
+                },
+                "required": ["source_url", "link_type_uri", "target_url"]
+            }
+        ),
+        # ── EWM: defect creation ───────────────────────────────
+        Tool(
+            name="create_defect",
+            description=(
+                "Create an EWM Defect work item. Resolves the project category for "
+                "`rtc_cm:filedAgainst` automatically (process rules typically reject the "
+                "Unassigned default — this tool picks the first concrete category). Severity "
+                "can be a friendly name (Minor/Moderate/Major/Critical) or a literal URI. "
+                "Optional cross-links: requirement_url (calm:affectedByDefect) and "
+                "test_case_url (oslc_cm:relatedTestCase). "
+                "Use list_projects domain='ewm' first."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "ewm_project": {
+                        "type": "string",
+                        "description": "EWM project number or name"
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Defect title (will be prefixed with [AI Generated])"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Description / repro steps"
+                    },
+                    "severity": {
+                        "type": "string",
+                        "description": "Optional severity label (Minor / Moderate / Major / Critical / Blocker / Unclassified)"
+                    },
+                    "requirement_url": {
+                        "type": "string",
+                        "description": "Optional DNG requirement URL — links via calm:affectedByDefect"
+                    },
+                    "test_case_url": {
+                        "type": "string",
+                        "description": "Optional ETM test case URL — links via oslc_cm:relatedTestCase"
+                    }
+                },
+                "required": ["ewm_project", "title"]
+            }
+        ),
+        # ── SCM (read-only) ────────────────────────────────────
+        Tool(
+            name="scm_list_projects",
+            description=(
+                "List all CCM/EWM project areas that have an SCM service provider. "
+                "Reads /ccm/oslc-scm/catalog (note the hyphen — not underscore). "
+                "Returns name, projectAreaId, providerUrl. Use this before scm_list_changesets "
+                "to filter by project."
+            ),
+            inputSchema={"type": "object", "properties": {}, "required": []}
+        ),
+        Tool(
+            name="scm_list_changesets",
+            description=(
+                "List recent SCM change-sets via the TRS feed at "
+                "/ccm/rtcoslc/scm/reportable/trs/cs. Each TRS page exposes ~5 most-recent "
+                "items so this tool walks <trs:previous> until `limit` is reached. "
+                "For each change-set, returns itemId, title, component, author, modified, "
+                "totalChanges, and any work-item links (resolved via /ccm/rtcoslc/scm/cslink/trs). "
+                "Optional `project_name` filter restricts to one project area."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "project_name": {
+                        "type": "string",
+                        "description": "Optional project name (substring match) — call scm_list_projects to see options"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max change-sets to return (default 25)"
+                    }
+                },
+                "required": []
+            }
+        ),
+        Tool(
+            name="scm_get_changeset",
+            description=(
+                "Fetch a single SCM change-set by its itemId (the `_xxx...` token). "
+                "GETs /ccm/rtcoslc/scm/reportable/cs/<id> for metadata and constructs the "
+                "canonical /ccm/resource/itemOid/com.ibm.team.scm.ChangeSet/<id> URL. "
+                "Returns full metadata + linked work items + raw RDF. "
+                "Pass an itemId obtained from scm_list_changesets."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "changeset_id": {
+                        "type": "string",
+                        "description": "Change-set item ID (e.g. '_UrB4WENEEfGL3a8XuCNang' — leading underscore optional)"
+                    }
+                },
+                "required": ["changeset_id"]
+            }
+        ),
+        Tool(
+            name="scm_get_workitem_changesets",
+            description=(
+                "List the SCM change-sets attached to a single EWM work item. "
+                "GETs /ccm/resource/itemName/com.ibm.team.workitem.WorkItem/<id> and parses "
+                "the rtc_cm:com.ibm.team.filesystem.workitems.change_set.com.ibm.team.scm.ChangeSet "
+                "triples. Returns [{changeSetId, title, url}]. Empty list if the WI has no "
+                "code attached — that's normal."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "workitem_id": {
+                        "type": "string",
+                        "description": "Numeric work-item ID (e.g. '3323')"
+                    }
+                },
+                "required": ["workitem_id"]
+            }
+        ),
+        Tool(
+            name="review_get",
+            description=(
+                "Fetch review-relevant fields for an EWM work item: title, state, type, "
+                "approved/reviewed booleans, approval records, linked change-sets, and the "
+                "comments URL. Approval shape: {approver, descriptor, stateName, stateIdentifier}. "
+                "Works on any work item — review-typed work items are not required (the "
+                "approval shape is universal)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "workitem_id": {
+                        "type": "string",
+                        "description": "Numeric work-item ID"
+                    }
+                },
+                "required": ["workitem_id"]
+            }
+        ),
+        Tool(
+            name="review_list_open",
+            description=(
+                "List open EWM review work items in a project (type = "
+                "com.ibm.team.review.workItemType.review and oslc_cm:closed=false). "
+                "Most projects on this server have zero review-typed WIs — that's not an "
+                "error, the OSLC query simply returns an empty list. Use review_get on any "
+                "work item to read its approvals."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "ewm_project": {
+                        "type": "string",
+                        "description": "EWM project number or name"
+                    }
+                },
+                "required": ["ewm_project"]
+            }
+        ),
     ]
 
 
@@ -1020,7 +1437,6 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             if not file_path:
                 return [TextContent(type="text", text="Error: file_path is required.")]
 
-            import os
             if not os.path.exists(file_path):
                 return [TextContent(type="text", text=f"Error: File not found: {file_path}")]
 
@@ -1478,17 +1894,57 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             return [TextContent(type="text", text="\n".join(lines))]
 
         # ── create_requirements ───────────────────────────────
+        elif name == "create_module":
+            proj_id = arguments.get("project_identifier", "")
+            title = arguments.get("title", "")
+            description = arguments.get("description", "")
+
+            if not proj_id:
+                return [TextContent(type="text", text="Error: project_identifier is required.")]
+            if not title:
+                return [TextContent(type="text", text="Error: title is required.")]
+
+            if not _projects_cache:
+                _projects_cache = client.list_projects()
+            project = _find_by_identifier(_projects_cache, proj_id)
+            if not project:
+                return [TextContent(type="text", text=f"Project not found: '{proj_id}'")]
+
+            result = client.create_module(project['url'], title, description)
+            if result and 'error' not in result:
+                return [TextContent(type="text", text=(
+                    f"# Module Created in '{project['title']}'\n\n"
+                    f"- **Title:** {result['title']}\n"
+                    f"- **URL:** `{result['url']}`\n\n"
+                    f"**Next step:** call `create_requirements` with `module_name` set to "
+                    f"`{result['title']}` to populate this module."
+                ))]
+            err = result.get('error', 'unknown error') if result else 'unknown error'
+            return [TextContent(type="text", text=(
+                f"Error: failed to create module — {err}\n"
+                "Check that you have write permissions in this project and that "
+                "the project has a 'Module' artifact type defined."
+            ))]
+
         elif name == "create_requirements":
             proj_id = arguments.get("project_identifier", "")
             folder_name = arguments.get("folder_name", "")
+            module_name = arguments.get("module_name", "")
             reqs_data = arguments.get("requirements", [])
 
             if not proj_id:
                 return [TextContent(type="text", text="Error: project_identifier is required.")]
-            if not folder_name:
-                return [TextContent(type="text", text="Error: folder_name is required.")]
             if not reqs_data:
                 return [TextContent(type="text", text="Error: requirements array is empty.")]
+
+            # Default folder name when only module_name was given
+            if module_name and not folder_name:
+                folder_name = f"[AI Generated] {module_name}"
+            if not folder_name and not module_name:
+                return [TextContent(type="text", text=(
+                    "Error: provide module_name (preferred — makes the requirements "
+                    "visible as a navigable document in DNG) and/or folder_name."
+                ))]
 
             if not _projects_cache:
                 _projects_cache = client.list_projects()
@@ -1507,7 +1963,34 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                     "Check your permissions."
                 ))]
 
-            # Create a folder to hold the requirements
+            # Find or create the target module if requested
+            module = None
+            if module_name:
+                # Re-use cached module if we created it in this session
+                module = _folder_cache.get(f"__module__::{module_name}")
+                if not module:
+                    # Search existing modules in the project
+                    try:
+                        existing = client.get_modules(project['url'])
+                    except Exception:
+                        existing = []
+                    target = module_name.lower()
+                    for m in existing:
+                        m_title = (m.get('title') or '').lower()
+                        if m_title == target or m_title == f"[ai generated] {target}":
+                            module = m
+                            break
+                if not module:
+                    created_mod = client.create_module(project['url'], module_name)
+                    if not created_mod or 'error' in created_mod:
+                        err = created_mod.get('error', 'unknown') if created_mod else 'unknown'
+                        return [TextContent(type="text", text=(
+                            f"Error: could not find or create module '{module_name}' — {err}"
+                        ))]
+                    module = created_mod
+                _folder_cache[f"__module__::{module_name}"] = module
+
+            # Find or create the holding folder for the base artifacts
             folder = _folder_cache.get(folder_name)
             if not folder:
                 folder = client.find_folder(project['url'], folder_name)
@@ -1579,12 +2062,22 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                     error_detail = result.get('error', 'API error') if result else 'API error'
                     failed.append(f"'{title[:40]}' - {error_detail}")
 
+            # Bind the freshly created requirements to the module in one PUT
+            bind_status = None
+            if module and created:
+                bind_status = client.add_to_module(
+                    module['url'],
+                    [r['url'] for r in created if r.get('url')],
+                )
+
             # Build response
             lines = [
                 f"# Requirements Created in '{project['title']}'\n",
-                f"Folder: **{folder_name}**\n",
-                f"Created **{len(created)}** of {len(reqs_data)} requirement(s):\n",
             ]
+            if module:
+                lines.append(f"Module: **{module['title']}**  `{module['url']}`")
+            lines.append(f"Folder: **{folder_name}**\n")
+            lines.append(f"Created **{len(created)}** of {len(reqs_data)} requirement(s):\n")
 
             for i, r in enumerate(created, 1):
                 lines.append(f"{i}. {r['title']}")
@@ -1596,11 +2089,25 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                 for f_msg in failed:
                     lines.append(f"- {f_msg}")
 
-            lines.append(
-                f"\n**Next step:** Open DNG and review the requirements in the "
-                f"'{folder_name}' folder. To organize them, create a module in DNG "
-                f"and add these requirements to it."
-            )
+            if module and bind_status:
+                if 'error' in bind_status:
+                    lines.append(
+                        f"\n**Warning:** requirements were created but binding to module "
+                        f"failed: {bind_status['error']}. The requirements still exist in "
+                        f"the folder and can be added to the module manually in DNG."
+                    )
+                else:
+                    added = bind_status.get('added', 0)
+                    lines.append(
+                        f"\n**Bound to module:** {added} requirement(s) added to "
+                        f"'{module['title']}'. Open the module in DNG to see them in order."
+                    )
+            elif not module:
+                lines.append(
+                    f"\n**Note:** no module_name was provided, so these requirements live in "
+                    f"the folder '{folder_name}' as standalone artifacts. To make them appear "
+                    f"in a navigable document, re-run with `module_name` set, or move them in DNG."
+                )
 
             return [TextContent(type="text", text="\n".join(lines))]
 
@@ -1951,6 +2458,414 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
 
             return [TextContent(type="text", text="\n".join(lines))]
 
+        # ── generate_chart ────────────────────────────────────
+        elif name == "generate_chart":
+            chart_type = arguments.get("chart_type", "").strip().lower()
+            title = arguments.get("title", "").strip()
+            labels = arguments.get("labels") or []
+            values = arguments.get("values") or []
+            x_label = arguments.get("x_label", "")
+            y_label = arguments.get("y_label", "")
+            output_filename = (arguments.get("output_filename") or "").strip()
+
+            if chart_type not in {"bar", "hbar", "pie", "line"}:
+                return [TextContent(type="text", text=(
+                    "Error: chart_type must be one of: bar, hbar, pie, line."
+                ))]
+            if not title:
+                return [TextContent(type="text", text="Error: title is required.")]
+            if not labels or not values:
+                return [TextContent(type="text", text=(
+                    "Error: labels and values are both required and must be non-empty."
+                ))]
+            if len(labels) != len(values):
+                return [TextContent(type="text", text=(
+                    f"Error: labels ({len(labels)}) and values ({len(values)}) "
+                    "must have the same length."
+                ))]
+            try:
+                values = [float(v) for v in values]
+            except (TypeError, ValueError):
+                return [TextContent(type="text", text="Error: values must be numbers.")]
+
+            try:
+                import matplotlib
+                matplotlib.use("Agg")
+                import matplotlib.pyplot as plt
+            except ImportError:
+                return [TextContent(type="text", text=(
+                    "matplotlib is not installed. Run: pip install -r requirements.txt"
+                ))]
+
+            import re, time
+            charts_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "charts")
+            os.makedirs(charts_dir, exist_ok=True)
+            if not output_filename:
+                slug = re.sub(r"[^a-zA-Z0-9]+", "_", title).strip("_").lower()[:60] or "chart"
+                output_filename = f"{slug}_{int(time.time())}"
+            output_filename = re.sub(r"[^a-zA-Z0-9_\-]+", "_", output_filename)[:80]
+            out_path = os.path.join(charts_dir, f"{output_filename}.png")
+
+            fig, ax = plt.subplots(figsize=(10, 6))
+            try:
+                if chart_type == "bar":
+                    ax.bar(labels, values, color="#1f77b4")
+                    if x_label: ax.set_xlabel(x_label)
+                    if y_label: ax.set_ylabel(y_label)
+                    if any(len(str(l)) > 10 for l in labels):
+                        plt.xticks(rotation=30, ha="right")
+                elif chart_type == "hbar":
+                    ax.barh(labels, values, color="#2ca02c")
+                    ax.invert_yaxis()
+                    if x_label: ax.set_xlabel(x_label)
+                    if y_label: ax.set_ylabel(y_label)
+                elif chart_type == "line":
+                    ax.plot(labels, values, marker="o", color="#ff7f0e", linewidth=2)
+                    if x_label: ax.set_xlabel(x_label)
+                    if y_label: ax.set_ylabel(y_label)
+                    if any(len(str(l)) > 10 for l in labels):
+                        plt.xticks(rotation=30, ha="right")
+                elif chart_type == "pie":
+                    if all(v == 0 for v in values):
+                        plt.close(fig)
+                        return [TextContent(type="text", text="Error: pie chart needs at least one non-zero value.")]
+                    ax.pie(values, labels=labels, autopct="%1.1f%%", startangle=90)
+                    ax.set_aspect("equal")
+
+                ax.set_title(title, fontsize=14, fontweight="bold")
+                fig.tight_layout()
+                fig.savefig(out_path, dpi=150, bbox_inches="tight")
+            finally:
+                plt.close(fig)
+
+            return [TextContent(type="text", text=(
+                f"Chart saved: {out_path}\n\n"
+                f"- Type: {chart_type}\n"
+                f"- Title: {title}\n"
+                f"- Data points: {len(labels)}\n"
+                f"- Total: {sum(values):g}"
+            ))]
+
+        # ── get_attribute_definitions (DNG) ────────────────────
+        elif name == "get_attribute_definitions":
+            proj_id = arguments.get("project_identifier", "")
+            if not proj_id:
+                return [TextContent(type="text", text="Error: project_identifier is required.")]
+            if not _projects_cache:
+                _projects_cache = client.list_projects()
+            project = _find_by_identifier(_projects_cache, proj_id)
+            if not project:
+                return [TextContent(type="text", text=f"Project not found: '{proj_id}'")]
+            defs = client.get_attribute_definitions(project['url'])
+            if not defs:
+                return [TextContent(type="text", text=(
+                    f"No attribute definitions found for '{project['title']}'. "
+                    "Either the shapes are empty or the project URL is unreachable."
+                ))]
+            lines = [f"# Attribute Definitions in '{project['title']}'", ""]
+            lines.append(f"**{len(defs)} unique attributes** (across all artifact types):\n")
+            enums = [d for d in defs if d['allowed_values']]
+            if enums:
+                lines.append(f"\n## {len(enums)} enum-valued (selectable):\n")
+                for d in enums[:25]:
+                    vals = ", ".join(av['label'] for av in d['allowed_values'][:6])
+                    lines.append(f"- **{d['title']}** (`{d['name']}`) → {vals}")
+                    lines.append(f"  - Predicate: `{d['predicate_uri']}`")
+            literals = [d for d in defs if not d['allowed_values']]
+            if literals:
+                lines.append(f"\n## {len(literals)} literal/free-form:\n")
+                for d in literals[:25]:
+                    lines.append(f"- **{d['title']}** (`{d['name']}`) → `{d['predicate_uri']}`")
+            return [TextContent(type="text", text="\n".join(lines))]
+
+        # ── update_requirement_attributes (DNG) ────────────────
+        elif name == "update_requirement_attributes":
+            req_url = arguments.get("requirement_url", "")
+            attrs = arguments.get("attributes") or {}
+            if not req_url or not attrs:
+                return [TextContent(type="text", text=(
+                    "Error: requirement_url and attributes are required."
+                ))]
+            result = client.update_requirement_attributes(req_url, attrs)
+            if result and 'error' not in result:
+                applied = result.get('updated', [])
+                return [TextContent(type="text", text=(
+                    f"# Requirement Attributes Updated\n\n"
+                    f"- **URL:** `{result.get('url', req_url)}`\n"
+                    f"- **Applied:** {', '.join(applied) if applied else '(none — keys did not match any shape)'}\n\n"
+                    f"For enum-valued attributes, the value is mapped from a friendly label "
+                    f"(e.g. 'High') to the corresponding allowed-value URI."
+                ))]
+            else:
+                err = result.get('error', '') if result else ''
+                return [TextContent(type="text", text=(
+                    f"Failed to update requirement attributes.\n{err}"
+                ))]
+
+        # ── update_work_item (EWM) ─────────────────────────────
+        elif name == "update_work_item":
+            wi_url = arguments.get("workitem_url", "")
+            fields = arguments.get("fields") or {}
+            if not wi_url or not fields:
+                return [TextContent(type="text", text=(
+                    "Error: workitem_url and fields are required."
+                ))]
+            result = client.update_work_item(wi_url, fields)
+            if result and 'error' not in result:
+                return [TextContent(type="text", text=(
+                    f"# Work Item Updated\n\n"
+                    f"- **URL:** `{result.get('url', wi_url)}`\n"
+                    f"- **Applied:** {', '.join(result.get('updated', []))}"
+                ))]
+            err = result.get('error', '') if result else ''
+            return [TextContent(type="text", text=f"Failed to update work item.\n{err}")]
+
+        # ── transition_work_item (EWM) ─────────────────────────
+        elif name == "transition_work_item":
+            wi_url = arguments.get("workitem_url", "")
+            target = arguments.get("target_state", "")
+            if not wi_url or not target:
+                return [TextContent(type="text", text=(
+                    "Error: workitem_url and target_state are required."
+                ))]
+            result = client.transition_work_item(wi_url, target)
+            if result and 'error' not in result:
+                return [TextContent(type="text", text=(
+                    f"# Work Item Transitioned\n\n"
+                    f"- **URL:** `{result['url']}`\n"
+                    f"- **State:** `{result['state'].rsplit('/', 1)[-1]}`\n"
+                    f"- **Action used:** `{result.get('action', '?')}`"
+                ))]
+            err = result.get('error', '') if result else ''
+            return [TextContent(type="text", text=f"Failed to transition work item.\n{err}")]
+
+        # ── query_work_items (EWM) ─────────────────────────────
+        elif name == "query_work_items":
+            ewm_proj = arguments.get("ewm_project", "")
+            where = arguments.get("where", "")
+            select = arguments.get("select", "*")
+            page_size = int(arguments.get("page_size", 25) or 25)
+            if not ewm_proj:
+                return [TextContent(type="text", text="Error: ewm_project is required.")]
+            if not _ewm_projects_cache:
+                _ewm_projects_cache = client.list_ewm_projects()
+            project = _find_by_identifier(_ewm_projects_cache, ewm_proj)
+            if not project:
+                return [TextContent(type="text", text=f"EWM project not found: '{ewm_proj}'")]
+            items = client.query_work_items(
+                ewm_project_url=project['url'],
+                where=where,
+                select=select,
+                page_size=page_size,
+            )
+            if not items:
+                return [TextContent(type="text", text=(
+                    f"No work items returned for '{project['title']}' with where=`{where or '(none)'}`."
+                ))]
+            lines = [f"# Work Items in '{project['title']}'", "",
+                     f"**{len(items)} match(es)**" + (f" for `{where}`" if where else ""), ""]
+            for it in items[:50]:
+                state_local = it['state'].rsplit('.', 1)[-1] if it.get('state') else ''
+                type_local = it['type'].rsplit('/', 1)[-1] if it.get('type') else ''
+                lines.append(f"- **{it.get('id', '?')}** {it.get('title', '')!r}  "
+                              f"state={state_local} type={type_local}")
+                lines.append(f"  - {it.get('url', '')}")
+            return [TextContent(type="text", text="\n".join(lines))]
+
+        # ── create_link (cross-domain) ─────────────────────────
+        elif name == "create_link":
+            src = arguments.get("source_url", "")
+            ltype = arguments.get("link_type_uri", "")
+            tgt = arguments.get("target_url", "")
+            if not (src and ltype and tgt):
+                return [TextContent(type="text", text=(
+                    "Error: source_url, link_type_uri, and target_url are all required."
+                ))]
+            result = client.create_link(src, ltype, tgt)
+            if result and 'error' not in result:
+                return [TextContent(type="text", text=(
+                    f"# Link Created\n\n"
+                    f"- **Source:** `{result['source']}`\n"
+                    f"- **Target:** `{result['target']}`\n"
+                    f"- **Link type:** `{result['link_type']}`\n\n"
+                    f"DNG normalizes custom link-type predicates after PUT — when re-fetching "
+                    f"the source, the link will appear under its standard local-name prefix "
+                    f"(e.g. `:satisfies`)."
+                ))]
+            err = result.get('error', '') if result else ''
+            return [TextContent(type="text", text=f"Failed to create link.\n{err}")]
+
+        # ── create_defect (EWM) ────────────────────────────────
+        elif name == "create_defect":
+            ewm_proj = arguments.get("ewm_project", "")
+            title = arguments.get("title", "")
+            description = arguments.get("description", "")
+            severity = arguments.get("severity", "")
+            req_url = arguments.get("requirement_url", "")
+            tc_url = arguments.get("test_case_url", "")
+            if not ewm_proj or not title:
+                return [TextContent(type="text", text=(
+                    "Error: ewm_project and title are required."
+                ))]
+            if not _ewm_projects_cache:
+                _ewm_projects_cache = client.list_ewm_projects()
+            project = _find_by_identifier(_ewm_projects_cache, ewm_proj)
+            if not project:
+                return [TextContent(type="text", text=f"EWM project not found: '{ewm_proj}'")]
+            result = client.create_defect(
+                service_provider_url=project['url'],
+                title=title, description=description,
+                severity=severity or None,
+                requirement_url=req_url or None,
+                test_case_url=tc_url or None,
+            )
+            if result and 'error' not in result:
+                lines = [
+                    "# Defect Created",
+                    "",
+                    f"- **Title:** {result['title']}",
+                    f"- **Project:** {project['title']}",
+                    f"- **URL:** {result['url']}",
+                ]
+                if severity:
+                    lines.append(f"- **Severity:** {severity}")
+                if req_url:
+                    lines.append(f"- **Affects requirement:** `{req_url}`")
+                if tc_url:
+                    lines.append(f"- **Related test case:** `{tc_url}`")
+                return [TextContent(type="text", text="\n".join(lines))]
+            err = result.get('error', '') if result else ''
+            return [TextContent(type="text", text=(
+                f"Failed to create defect in '{project['title']}'.\n{err}"
+            ))]
+
+        # ── scm_list_projects ─────────────────────────────────
+        elif name == "scm_list_projects":
+            projects = client.scm_list_projects()
+            if not projects:
+                return [TextContent(type="text", text=(
+                    "No SCM projects found. Either /ccm/oslc-scm/catalog is unreachable "
+                    "or the catalog is empty."
+                ))]
+            lines = [f"# SCM Projects ({len(projects)} total)", ""]
+            for i, p in enumerate(projects[:50], 1):
+                lines.append(f"{i}. **{p['name']}**")
+                lines.append(f"   - paId: `{p['projectAreaId']}`")
+            if len(projects) > 50:
+                lines.append(f"\n…and {len(projects) - 50} more.")
+            return [TextContent(type="text", text="\n".join(lines))]
+
+        # ── scm_list_changesets ────────────────────────────────
+        elif name == "scm_list_changesets":
+            project_name = arguments.get("project_name", "") or None
+            limit = int(arguments.get("limit", 25) or 25)
+            cs = client.scm_list_changesets(project_name=project_name, limit=limit)
+            if not cs:
+                return [TextContent(type="text", text=(
+                    "No change-sets returned. The TRS feed may be empty or the project "
+                    f"filter '{project_name}' did not match any change-sets in the recent "
+                    "TRS pages."
+                ))]
+            lines = [f"# Recent SCM Change-Sets ({len(cs)})", ""]
+            for x in cs:
+                lines.append(f"- **{x['itemId']}** — {x['title']!r}")
+                lines.append(f"  - Component: {x['component']}, Author: `{x['author']}`")
+                lines.append(f"  - Modified: {x['modified']}, Changes: {x['totalChanges']}")
+                if x['workItems']:
+                    lines.append(f"  - Linked WIs: " + ", ".join(w['workItemId'] for w in x['workItems']))
+            return [TextContent(type="text", text="\n".join(lines))]
+
+        # ── scm_get_changeset ──────────────────────────────────
+        elif name == "scm_get_changeset":
+            cs_id = arguments.get("changeset_id", "")
+            if not cs_id:
+                return [TextContent(type="text", text="Error: changeset_id is required.")]
+            d = client.scm_get_changeset(cs_id)
+            if 'error' in d:
+                return [TextContent(type="text", text=f"Failed: {d['error']}")]
+            lines = [
+                f"# Change-Set {d['itemId']}", "",
+                f"- **Title:** {d['title']}",
+                f"- **Component:** {d['component']}",
+                f"- **Author:** `{d['author']}`",
+                f"- **Modified:** {d['modified']}",
+                f"- **Total changes:** {d['totalChanges']}",
+                f"- **Reportable URL:** {d['reportable_url']}",
+                f"- **Canonical URL:** {d['canonical_url']}",
+            ]
+            if d.get('workItems'):
+                lines.append(f"\n### Linked Work Items ({len(d['workItems'])})")
+                for w in d['workItems']:
+                    lines.append(f"- {w['workItemId']}: {w['url']}")
+            return [TextContent(type="text", text="\n".join(lines))]
+
+        # ── scm_get_workitem_changesets ────────────────────────
+        elif name == "scm_get_workitem_changesets":
+            wi_id = arguments.get("workitem_id", "")
+            if not wi_id:
+                return [TextContent(type="text", text="Error: workitem_id is required.")]
+            cs = client.scm_get_workitem_changesets(wi_id)
+            if not cs:
+                return [TextContent(type="text", text=(
+                    f"Work item {wi_id} has no SCM change-sets attached. "
+                    "(That's normal for non-development work.)"
+                ))]
+            lines = [f"# Change-Sets on Work Item {wi_id} ({len(cs)})", ""]
+            for x in cs:
+                lines.append(f"- **{x['changeSetId']}** — {x['title']!r}")
+                lines.append(f"  - URL: {x['url']}")
+            return [TextContent(type="text", text="\n".join(lines))]
+
+        # ── review_get ─────────────────────────────────────────
+        elif name == "review_get":
+            wi_id = arguments.get("workitem_id", "")
+            if not wi_id:
+                return [TextContent(type="text", text="Error: workitem_id is required.")]
+            r = client.review_get(wi_id)
+            if 'error' in r:
+                return [TextContent(type="text", text=f"Failed: {r['error']}")]
+            lines = [
+                f"# Review-View of Work Item {wi_id}", "",
+                f"- **Title:** {r.get('title','')}",
+                f"- **State:** `{r.get('state','').rsplit('/',1)[-1]}`",
+                f"- **Type:** `{r.get('type','').rsplit('/',1)[-1]}`",
+                f"- **approved:** {r.get('approved')}",
+                f"- **reviewed:** {r.get('reviewed')}",
+                f"- **Comments URL:** `{r.get('comments_url','')}`",
+            ]
+            apps = r.get('approvals', [])
+            lines.append(f"\n### Approvals ({len(apps)})")
+            for a in apps[:20]:
+                lines.append(f"- {a.get('descriptor','')} — approver `{a.get('approver','')}` "
+                              f"state {a.get('stateName','')} ({a.get('stateIdentifier','')})")
+            cs = r.get('changeSets', [])
+            lines.append(f"\n### Linked Change-Sets ({len(cs)})")
+            for c in cs[:20]:
+                lines.append(f"- {c['changeSetId']}: {c['url']}")
+            return [TextContent(type="text", text="\n".join(lines))]
+
+        # ── review_list_open ───────────────────────────────────
+        elif name == "review_list_open":
+            ewm_proj = arguments.get("ewm_project", "")
+            if not ewm_proj:
+                return [TextContent(type="text", text="Error: ewm_project is required.")]
+            if not _ewm_projects_cache:
+                _ewm_projects_cache = client.list_ewm_projects()
+            project = _find_by_identifier(_ewm_projects_cache, ewm_proj)
+            if not project:
+                return [TextContent(type="text", text=f"EWM project not found: '{ewm_proj}'")]
+            items = client.review_list_open(project['url'])
+            if not items:
+                return [TextContent(type="text", text=(
+                    f"No open review work items in '{project['title']}'. "
+                    "(This is the normal case on this server — review-typed WIs are rare.)"
+                ))]
+            lines = [f"# Open Reviews in '{project['title']}' ({len(items)})", ""]
+            for it in items:
+                lines.append(f"- **{it.get('id', '?')}** {it.get('title', '')!r} state="
+                              f"`{it.get('state','').rsplit('.',1)[-1]}`")
+            return [TextContent(type="text", text="\n".join(lines))]
+
         else:
             return [TextContent(type="text", text=f"Unknown tool: {name}")]
 
@@ -1966,7 +2881,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
 # ── Main ──────────────────────────────────────────────────────
 
 async def main():
-    logger.info("IBM ELM MCP Server starting (20 tools, 4 prompts, 3 resource templates)")
+    logger.info("IBM ELM MCP Server starting (33 tools, 4 prompts, 3 resource templates)")
     async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
         await app.run(read_stream, write_stream, app.create_initialization_options())
 

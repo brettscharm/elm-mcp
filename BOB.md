@@ -1,87 +1,49 @@
-# DOORS Next AI Agent
+# ELM MCP — AI Instructions (BOB.md)
 
-> **DISCLAIMER:** This is NOT an official IBM product. It is an independent, community-built integration. Use at your own risk. IBM, DOORS Next, ELM, EWM, and ETM are trademarks of IBM Corporation.
+> **DISCLAIMER:** This is a personal passion project. NOT an official IBM product, NOT created or endorsed by the ELM development team. Use at your own risk. IBM, DOORS Next, ELM, EWM, and ETM are trademarks of IBM Corporation.
 
-This MCP server connects you to IBM Engineering Lifecycle Management (ELM) — covering DNG (requirements), EWM (work items), and ETM (test management).
-All the heavy lifting is done by the MCP tools — you do NOT need to write any Python code.
+This MCP server connects you to IBM Engineering Lifecycle Management (ELM) — DNG (requirements), EWM (work items), ETM (test management), GCM (global config), and SCM (code / change-sets / reviews). 35 tools total. All the heavy lifting is done by the MCP tools — you do NOT need to write any Python code.
 
-## First-Time Setup (Do This Automatically)
+## First-Time Setup
 
-When a user says "connect to ELM" and the `doors-next` MCP server is NOT available yet, do ALL of this automatically — don't ask the user to do manual steps:
+If the user says "connect to ELM" and the `doors-next` MCP server is NOT available, do NOT try to write MCP config files yourself. Tell the user:
 
-1. **Install dependencies:**
-   ```bash
-   pip install -r requirements.txt
-   ```
+> "Run `python3 setup.py` in the project directory. It installs deps, writes the MCP config for whichever AI tools you have (Claude Code / VS Code / Cursor / Windsurf), prompts for ELM credentials, and verifies the server starts end-to-end. Then restart your AI assistant."
 
-2. **Get the absolute path** to this project directory:
-   ```bash
-   pwd
-   ```
+If they want to verify the server works without re-doing setup, tell them to run `python3 setup.py --diagnose` — it launches the MCP server in a subprocess, runs the protocol handshake, and confirms tools register.
 
-3. **Auto-detect the IDE and write the MCP config file directly.** Check which config file exists to determine the IDE:
+After the MCP server is available, proceed to the workflow below.
 
-   **Claude Code** (`~/.claude/settings.json` or `.claude/settings.json` in workspace):
-   - Read the existing settings file (create if missing)
-   - Add the `doors-next` entry under `mcpServers`
-   - Claude Code hot-reloads MCP config — NO restart needed
-   ```json
-   {
-     "mcpServers": {
-       "doors-next": {
-         "command": "python3",
-         "args": ["doors_mcp_server.py"],
-         "cwd": "<absolute path from pwd>"
-       }
-     }
-   }
-   ```
+## The proper development lifecycle (phase-gated)
 
-   **VS Code with the AI assistant / Copilot** (`.vscode/mcp.json` in workspace):
-   - Read or create `.vscode/mcp.json`
-   - Add the `doors-next` entry under `servers`
-   ```json
-   {
-     "servers": {
-       "doors-next": {
-         "command": "python3",
-         "args": ["doors_mcp_server.py"],
-         "cwd": "<absolute path from pwd>"
-       }
-     }
-   }
-   ```
+Engineering work in ELM follows this flow. **Each phase is a separate user-approval gate. Don't blast through all four without checking in.**
 
-   **Cursor** (`.cursor/mcp.json` in workspace):
-   - Read or create `.cursor/mcp.json`
-   - Add the `doors-next` entry
-   ```json
-   {
-     "mcpServers": {
-       "doors-next": {
-         "command": "python3",
-         "args": ["doors_mcp_server.py"],
-         "cwd": "<absolute path from pwd>"
-       }
-     }
-   }
-   ```
+```
+PHASE 1 — REQUIREMENTS (DNG)
+  Generate atomic "shall" statements. IEEE 29148 / INCOSE compliant.
+  Status starts at "Proposed". → STOP. "Review these. Approve to continue?"
+                                                           ↓
+PHASE 2 — IMPLEMENTATION TASKS (EWM)        only if user wants
+  One Task per requirement. Linked via calm:implementsRequirement.
+  → "Want me to create test cases too?"
+                                                           ↓
+PHASE 3 — TEST CASES (ETM)                  only if user wants
+  One Test Case per requirement. Linked via oslc_qm:validatesRequirement.
+  Test steps and pass/fail conditions live HERE — not inside the requirement.
+                                                           ↓
+PHASE 4 — DEFECTS (EWM)                     when tests fail
+  Failing test result → create_defect. Linked back to test result and
+  original requirement. Transition through workflow with transition_work_item.
+```
 
-   **Windsurf** (`~/.codeium/windsurf/mcp_config.json`):
-   - Read or create the config file
-   - Add the `doors-next` entry under `mcpServers`
-
-   If you can't determine the IDE, write `.vscode/mcp.json` as the default (most common).
-
-4. **Check if a restart is needed:**
-   - Claude Code: NO restart needed — just wait a few seconds and try `list_projects`
-   - VS Code / Cursor / Windsurf: Tell the user to **reload the window** (Cmd+Shift+P → "Reload Window") — this is faster than a full restart
-
-5. After the MCP server is available, proceed to the workflow below.
+**What you will not do automatically:**
+- Push past Phase 1 without explicit user approval
+- Mark a requirement "Approved" — that's a human gate (the user does it in DNG)
+- Skip cross-domain links — every artifact must trace back
 
 ## Conversation Flow (Follow This Exactly)
 
-**CRITICAL RULE: NEVER call `create_requirements`, `update_requirement`, `create_task`, `create_test_case`, or `create_test_result` without showing the user a preview table FIRST and getting their explicit approval (e.g., "yes", "go ahead", "push them"). No exceptions.**
+**CRITICAL RULE: NEVER call `create_requirements`, `update_requirement`, `update_requirement_attributes`, `create_task`, `create_defect`, `update_work_item`, `transition_work_item`, `create_test_case`, `create_test_result`, or `create_link` without showing the user a preview FIRST and getting their explicit approval (e.g., "yes", "go ahead", "push them"). No exceptions.**
 
 ### Step 1: Connect
 
@@ -376,8 +338,8 @@ Only proceed after the user explicitly confirms. If ALL requirements ARE Approve
 - The only tool that modifies existing artifacts is `update_requirement` — and it REQUIRES showing the diff and getting approval first
 - **NEVER** touch Approved requirements unless the user explicitly confirms
 - **ALWAYS** show the user what will be created or changed and get explicit confirmation before writing
-- The human is responsible for creating modules, adding requirements to modules, assigning work items, and setting approval status
-- **Module creation is a manual step** — the OSLC API does not support adding requirements into modules programmatically. The AI creates requirements in folders; the user creates modules and adds requirements to them in the DNG web UI.
+- The human is responsible for approving requirements, assigning work items, and dragging requirements into modules (see below)
+- **`create_module` works** — call it to create a new DNG module artifact. **But adding requirements to a module's structure programmatically is locked down by DNG** on most server deployments — `oslc_rm:uses` writes return `400 "Content must be valid rdf+xml"` even though the body is valid XML. After `create_requirements` runs, the requirements live in a folder; tell the user to drag them into the module in the DNG web UI. ReqIF import is the only documented programmatic alternative and is not yet implemented. (Full investigation: `probe/MODULE_BINDING_FINDINGS.md`.)
 - If deriving work from non-approved requirements, the generated artifacts must include a note:
   > "[AI Generated] Note: Generated from requirements that were not yet Approved at time of creation."
 
@@ -395,8 +357,12 @@ Only proceed after the user explicitly confirms. If ALL requirements ARE Approve
 | `search_requirements` | Full-text search across all artifacts in a project | project_identifier, query |
 | `get_artifact_types` | List valid artifact types for a project (call before `create_requirements`) | project_identifier |
 | `get_link_types` | List link types for a project (call before `create_requirements` if linking) | project_identifier |
-| `create_requirements` | Create requirements in DNG | project_identifier, folder_name, requirements[] |
-| `update_requirement` | Update an existing requirement's title/content | requirement_url, title (optional), content (optional) |
+| `create_module` | Create a new DNG module artifact (the module shows up in DNG; drag-bind requirements via UI — see Important Rules) | project_identifier, title, description (optional) |
+| `create_requirements` | Create requirements in DNG. `content` accepts plain text, Markdown (with tables/images/lists/headings), or raw XHTML. Goes into `jazz_rm:primaryText` (the rich-text body). | project_identifier, folder_name, requirements[] |
+| `update_requirement` | Update an existing requirement's title or content (rich-text body) | requirement_url, title (optional), content (optional) |
+| `get_attribute_definitions` | List ALL custom DNG attribute definitions for a project (name, predicate URI, value type, enum allowed values). **Call this before `update_requirement_attributes`** to discover valid attribute names and enum values. | project_identifier |
+| `update_requirement_attributes` | Set arbitrary DNG attributes (Status, Priority, Stability, Owner, etc.). Pass either attribute names (resolved via `get_attribute_definitions`) or full predicate URIs. Values can be literals or enum-value labels (e.g. "High"). | requirement_url, attributes (dict of name→value) |
+| `create_link` | Create a link between any two existing artifacts (DNG↔DNG, DNG↔EWM, etc.). For new links between artifacts that already exist; the on-creation `link_to`/`link_type` fields in `create_requirements` cover only links you create at the same time as the requirement. | source_url, link_type_uri, target_url |
 | `create_baseline` | Create a baseline snapshot of a project | project_identifier, title, description (optional) |
 | `list_baselines` | List existing baselines for a project | project_identifier |
 | `compare_baselines` | Compare baseline vs current stream (shows diff) | project_identifier, module_identifier, baseline_url |
@@ -407,6 +373,10 @@ Only proceed after the user explicitly confirms. If ALL requirements ARE Approve
 | Tool | What it does | Parameters |
 |------|-------------|------------|
 | `create_task` | Create an EWM Task | ewm_project, title, description (optional), requirement_url (optional) |
+| `create_defect` | Create an EWM Defect (handles "Filed Against" category resolution automatically) | ewm_project, title, description, severity (Minor/Normal/Major/Critical/Blocker), requirement_url (optional), test_case_url (optional) |
+| `update_work_item` | Update arbitrary fields on an EWM work item (title, description, owner, custom fields) via PUT-with-If-Match | workitem_url, fields (dict of name→value) |
+| `transition_work_item` | Move a work item through its workflow (e.g. New → In Progress → Resolved → Closed). Uses `?_action=` since direct state PUT is silently rejected by EWM. | workitem_url, target_state |
+| `query_work_items` | Query EWM work items with `oslc.where` filter (e.g. `oslc_cm:closed=false`, `dcterms:type="Defect"`). Returns `{id, title, state, type, owner, modified, url}` per match. | ewm_project, where, select (optional, default "*"), page_size (optional, default 25) |
 
 ### ETM (Test Management)
 
@@ -423,6 +393,27 @@ Only proceed after the user explicitly confirms. If ALL requirements ARE Approve
 | `list_global_components` | List all components across DNG/EWM/ETM | none |
 | `get_global_config_details` | Get details + contributions for a global config | config_url |
 
+### SCM / Code Reviews (read-only)
+
+These tools cover the EWM SCM and code-review surface. Use them when the user asks "show me recent change-sets", "what's been delivered to project X", "what change-sets are linked to work-item N", or "show me the review for that work-item".
+
+| Tool | What it does | Parameters |
+|------|-------------|------------|
+| `scm_list_projects` | List all CCM projects that have SCM data (one entry per project area). Use this to map a project name → projectAreaId. | (none) |
+| `scm_list_changesets` | List recent change-sets, optionally scoped to a project. Walks the TRS feed and dereferences each change-set for full metadata. Returns `{itemId, title, component, author, modified, totalChanges, workItems[]}`. | project_name (optional), limit (default 25) |
+| `scm_get_changeset` | Full metadata + raw RDF for a single change-set, including linked work items. | changeset_id |
+| `scm_get_workitem_changesets` | Reverse-lookup: given a work-item id, list the change-sets linked to it. | workitem_id |
+| `review_get` | Full review record for a work-item: title, state, type, approved/reviewed flags, all approval records (`approver, descriptor, state`), linked change-sets, comments. Works on any work-item — review-typed work-items are the canonical case but every WI has the approval shape. | workitem_id |
+| `review_list_open` | Query EWM for open code-review work-items in a project (type = `com.ibm.team.review.workItemType.review`, `oslc_cm:closed=false`). May return zero on installations that don't use review work-items — that's expected, not an error. | ewm_project |
+
+### Visualization
+
+| Tool | What it does | Parameters |
+|------|-------------|------------|
+| `generate_chart` | Render bar/hbar/pie/line chart as PNG | chart_type, title, labels, values, x_label?, y_label?, output_filename? |
+
+**When to use `generate_chart`:** any time the user asks to visualize, plot, graph, or "show me a chart" of ELM data — requirements by status, test pass/fail rates, tasks per priority, requirement counts per module, etc. **You** aggregate the raw data first (count, group, sum) from the previous tool calls, then pass the summary numbers in. Pick `pie` for proportions, `bar`/`hbar` for category comparisons (use `hbar` when labels are long), `line` for trends over time. The tool returns the absolute path to a PNG — show it to the user as a markdown image (`![title](/abs/path.png)`) so it renders inline.
+
 ## Important Rules
 
 - Do NOT write Python code to interact with ELM. Use the MCP tools only.
@@ -432,4 +423,6 @@ Only proceed after the user explicitly confirms. If ALL requirements ARE Approve
 - For EWM tasks, always include the `requirement_url` when creating tasks from DNG requirements (cross-tool traceability).
 - For ETM test cases, always include the `requirement_url` when creating from DNG requirements (validates requirement link).
 - Requirement URLs come from `get_module_requirements` output or `create_requirements` output — both tools show the URL for each requirement.
-- Skip for now: EWM Defects/Stories (Filed Against namespace issue), EWM status updates.
+- For requirement content: prefer **Markdown** for `content` — full Markdown including tables, images, headings, lists, links, bold/italic, and code blocks is auto-converted to clean XHTML. For complex layouts you can also pass raw XHTML (must start with `<`, must be valid XML — only the 5 XML entities `&amp; &lt; &gt; &quot; &apos;` work; use literal Unicode for anything else like `±` or `°`).
+- For images in requirements: external `<img src="https://…">` URLs may be blocked by DNG's CSP — if an image doesn't render, use a `data:` URI for small images, or upload as a DNG attachment and reference the internal URL.
+- Acceptance criteria / verification methods belong in **ETM test cases** linked to the requirement, NOT inside the requirement body. Some teams put a brief pass/fail line in the requirement; that's fine, but full test procedures live in ETM (Phase 3 of the lifecycle).

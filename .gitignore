@@ -55,6 +55,26 @@ htmlcov/
 requirements.json
 requirements.md
 *.csv
+charts/
+
+# Per-machine MCP configs (setup.py writes absolute paths into them)
+.mcp.json
+.cursor/
+.codeium/
+
+# Probe directory — keep .md reports + .py scripts as reference,
+# exclude raw server dumps that may contain project-specific or
+# user-identifying data
+probe/SANDBOX_PROJECTS.json
+probe/all_projects.json
+probe/dng_projects.json
+probe/modules.json
+probe/module_candidates.json
+probe/writable_dng_projects.json
+probe/A_C_LIVE_TESTS.txt
+probe/*.xml
+probe/oslc_*.json
+probe/scm_*.json
 
 # Exploration/test output files
 *_exploration.txt
