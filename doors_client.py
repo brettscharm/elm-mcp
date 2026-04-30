@@ -729,7 +729,8 @@ class DOORSNextClient:
 
     # ── Requirements ──────────────────────────────────────────
 
-    def get_module_requirements(self, module_url: str, config_url: Optional[str] = None) -> List[Dict]:
+    def get_module_requirements(self, module_url: str, config_url: Optional[str] = None,
+                                  filter: Optional[Dict] = None) -> List[Dict]:
         """Get requirements from a specific module by its URL.
 
         Uses the Reportable REST API (publish/resources?moduleURI=...).
@@ -739,6 +740,18 @@ class DOORSNextClient:
             module_url: The module's URL
             config_url: Optional configuration context URL (baseline or stream).
                         If provided, reads requirements from that specific configuration.
+            filter: Optional dict applied client-side to the returned list. Each
+                    key/value pair filters the result. Supports:
+                      - Exact match on top-level fields:
+                          {"artifact_type": "System Requirement"}
+                      - Exact match on custom attributes (project-specific):
+                          {"Status": "Approved", "Priority": "High"}
+                      - List-of-values (any-of match):
+                          {"Status": ["Approved", "Reviewed"]}
+                      - Substring match by appending "_contains":
+                          {"title_contains": "security"}
+                    Match is case-insensitive. Multiple keys are AND'd.
+                    Pass None or {} to return all requirements (default).
         """
         self._ensure_auth()
 
@@ -766,20 +779,23 @@ class DOORSNextClient:
                 root = ET.fromstring(resp.content)
 
                 # Try Reportable REST API namespaces
+                reqs = []
                 for ns_variant in self._NS_VARIANTS:
-                    reqs = self._parse_reqs_reportable(root, ns_variant)
-                    if reqs:
-                        return reqs
+                    parsed = self._parse_reqs_reportable(root, ns_variant)
+                    if parsed:
+                        reqs = parsed
+                        break
 
                 # Try namespace-agnostic parsing
-                reqs = self._parse_reqs_agnostic(root)
-                if reqs:
-                    return reqs
+                if not reqs:
+                    reqs = self._parse_reqs_agnostic(root)
 
                 # Try OSLC namespaces as final fallback
-                reqs = self._parse_reqs_oslc(root)
+                if not reqs:
+                    reqs = self._parse_reqs_oslc(root)
+
                 if reqs:
-                    return reqs
+                    return self._apply_filter(reqs, filter) if filter else reqs
 
             except requests.exceptions.Timeout:
                 continue
@@ -793,6 +809,37 @@ class DOORSNextClient:
         'http://jazz.net/xmlns/alm/rm/attribute/v0.1',
         'http://jazz.net/xmlns/prod/jazz/reporting/attribute/1.0/',
     ]
+
+    @staticmethod
+    def _apply_filter(reqs: List[Dict], filter_dict: Dict) -> List[Dict]:
+        """Apply a generic filter dict to a list of requirement dicts.
+
+        See get_module_requirements docstring for supported filter shapes.
+        Each requirement dict has top-level fields (title, artifact_type, id,
+        description) and a nested 'custom_attributes' dict for project-specific
+        attributes (Status, Priority, etc.). The filter walks both.
+        """
+        if not filter_dict:
+            return reqs
+
+        def match_one(req: Dict, key: str, want) -> bool:
+            if key.endswith('_contains'):
+                base = key[:-len('_contains')]
+                actual = (req.get(base)
+                          or req.get('custom_attributes', {}).get(base) or '')
+                if isinstance(want, list):
+                    return any(str(w).lower() in str(actual).lower() for w in want)
+                return str(want).lower() in str(actual).lower()
+            actual = req.get(key)
+            if actual is None:
+                actual = req.get('custom_attributes', {}).get(key, '')
+            actual_norm = str(actual).strip().lower()
+            if isinstance(want, list):
+                return actual_norm in {str(w).strip().lower() for w in want}
+            return actual_norm == str(want).strip().lower()
+
+        return [r for r in reqs
+                if all(match_one(r, k, v) for k, v in filter_dict.items())]
 
     def _parse_reqs_reportable(self, root: ET.Element, ns: dict) -> List[Dict]:
         """Parse requirements from Reportable REST API XML, including custom attributes"""

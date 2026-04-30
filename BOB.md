@@ -132,12 +132,37 @@ When the user picks a project (by name or number), ask:
 > 7. **Full Lifecycle** — Requirements → Tasks → Test Cases (all three)"
 
 ### Step 3a: READ Path
-If the user wants to read:
 
-1. Call `get_modules` with `project_identifier` → show the module list
-2. User picks a module → call `get_module_requirements` with `project_identifier` and `module_identifier` → show requirements (each has a URL you'll need for downstream tools)
-3. Ask: "Would you like to save these requirements to a file? (JSON, CSV, or Markdown)"
-4. If yes → call `save_requirements` with `format`
+The READ path is for pulling existing requirements out of DNG. Reading is non-destructive, but **don't dump 500 requirements when the user wants 5** — interview briefly so the result is useful.
+
+1. **Pick the module.** Call `get_modules` with `project_identifier`. Show the user the module list (numbered) and ask which one. If the user named it already, skip the listing.
+
+2. **Discover what's filterable in this project.** Call `get_attribute_definitions` for the project. This returns every custom DNG attribute with its valid enum values (Status options, Priority options, etc.) — these vary per project. **Do not skip this step** — different projects have different attributes; never assume a project has "Status" or "Approved" as values; check first.
+
+3. **Ask the user what they actually want.** Quick interview — pick whichever questions are relevant; skip the rest:
+   > *"That module has [N] requirements. Want to filter? Common options for this project:*
+   > - *By status (e.g. Approved-only) — values available: [list from step 2]*
+   > - *By artifact type — values: [System Requirement, Heading, etc.]*
+   > - *By priority / severity / owner / any custom attribute*
+   > - *By keyword in the title or description*
+   > - *Or just give me everything — say 'all'."*
+
+4. **Call `get_module_requirements`** with the resulting `filter` dict. Examples:
+   - All approved system requirements: `filter={"Status": "Approved", "artifact_type": "System Requirement"}`
+   - High-priority anything: `filter={"Priority": "High"}`
+   - Anything mentioning "security": `filter={"title_contains": "security"}`
+   - Multiple statuses: `filter={"Status": ["Approved", "Reviewed"]}`
+   - Everything: omit `filter` entirely or pass `{}`.
+
+5. **Show the user a clean summary** — count + a sample table of titles + URLs. Don't dump all the body content unless they ask.
+
+6. Ask: *"Want to save these to a file (JSON / CSV / Markdown), generate downstream artifacts (tasks / tests), or work on something else?"*
+   - If save → `save_requirements`
+   - If tasks → Step 3d (using these URLs as `requirement_url`)
+   - If tests → Step 3e
+   - If develop based on these → these URLs are now your context. Each requirement has the full link history (parent reqs, downstream tasks/tests/defects); use them to build implementations with full traceability.
+
+**Why the filter matters:** if the user says "I want to develop the implementation based on the approved requirements," you absolutely should NOT then call `get_module_requirements` with no filter and pull every draft / proposed / rejected req. Filter to `{"Status": "Approved"}` (or whatever the project's "approved" state is called) and only feed those to downstream tools.
 
 ### Step 3b: GENERATE REQUIREMENTS Path
 If the user wants to generate requirements, DO NOT start generating immediately. Follow this interview process:

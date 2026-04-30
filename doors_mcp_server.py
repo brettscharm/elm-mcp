@@ -74,7 +74,7 @@ load_dotenv()
 # decide if a newer GitHub release exists; the `connect_to_elm`
 # response also surfaces it so users always know what version they're
 # running.
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 GITHUB_REPO = "brettscharm/elm-mcp"
 
 app = Server("doors-next-server")
@@ -719,9 +719,12 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="get_module_requirements",
             description=(
-                "Get all requirements from a specific module within a project. "
-                "Call get_modules first to get module numbers. "
-                "Returns requirement URLs needed by update_requirement, create_task, and create_test_case."
+                "Get requirements from a module, optionally filtered by ANY attribute "
+                "(status, type, priority, custom field, title substring, etc.). "
+                "Call get_modules first to find the module. To discover what attributes "
+                "this project supports for filtering, call get_attribute_definitions. "
+                "Returns requirement URLs needed by update_requirement, create_task, "
+                "and create_test_case."
             ),
             inputSchema={
                 "type": "object",
@@ -733,6 +736,22 @@ async def list_tools() -> list[Tool]:
                     "module_identifier": {
                         "type": "string",
                         "description": "Module number (from get_modules output) or name"
+                    },
+                    "filter": {
+                        "type": "object",
+                        "description": (
+                            "Optional filter dict. Each key/value pair narrows results "
+                            "(AND'd together, case-insensitive). Examples:\n"
+                            "  • Exact: {\"Status\": \"Approved\"}, "
+                            "{\"artifact_type\": \"System Requirement\"}\n"
+                            "  • Multi-value (any-of): {\"Status\": [\"Approved\", \"Reviewed\"]}\n"
+                            "  • Substring (append _contains): {\"title_contains\": \"security\"}, "
+                            "{\"description_contains\": \"ISO 26262\"}\n\n"
+                            "The keys are project-specific — DIFFERENT DNG projects expose "
+                            "DIFFERENT custom attributes. Use get_attribute_definitions FIRST "
+                            "to see what's available; never guess attribute names."
+                        ),
+                        "additionalProperties": True
                     }
                 },
                 "required": ["project_identifier", "module_identifier"]
@@ -2052,14 +2071,18 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
 
             _last_module_name = module['title']
 
-            # Fetch requirements
-            requirements = client.get_module_requirements(module['url'])
+            # Fetch requirements (with optional filter)
+            user_filter = arguments.get("filter") or None
+            requirements = client.get_module_requirements(module['url'], filter=user_filter)
             _last_requirements = requirements
 
             if not requirements:
+                filter_note = f" matching filter `{user_filter}`" if user_filter else ""
                 return [TextContent(type="text", text=(
-                    f"No requirements found in module '{module['title']}'.\n\n"
-                    "The module may be empty or the requirements API returned no results."
+                    f"No requirements found in module '{module['title']}'{filter_note}.\n\n"
+                    "Either the module is empty, or your filter excluded everything. "
+                    "Call get_attribute_definitions on this project to see what attributes "
+                    "and values are valid for filtering."
                 ))]
 
             lines = [
