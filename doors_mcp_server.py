@@ -74,7 +74,7 @@ load_dotenv()
 # decide if a newer GitHub release exists; the `connect_to_elm`
 # response also surfaces it so users always know what version they're
 # running.
-__version__ = "0.1.3"
+__version__ = "0.1.4"
 GITHUB_REPO = "brettscharm/elm-mcp"
 
 app = Server("doors-next-server")
@@ -2277,10 +2277,14 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             if result and 'error' not in result:
                 return [TextContent(type="text", text=(
                     f"# Module Created in '{project['title']}'\n\n"
+                    f"**Click to open:** [{result['title']}]({result['url']})\n\n"
                     f"- **Title:** {result['title']}\n"
-                    f"- **URL:** `{result['url']}`\n\n"
-                    f"**Next step:** call `create_requirements` with `module_name` set to "
-                    f"`{result['title']}` to populate this module."
+                    f"- **Direct URL:** {result['url']}\n\n"
+                    f"**Next step:** call `create_requirements` with "
+                    f"`module_name=\"{result['title']}\"` to populate this module.\n\n"
+                    f"---\n"
+                    f"**Surface this exact module link to the user as a clickable markdown "
+                    f"link** — do NOT replace it with a generic `/rm` landing page URL."
                 ))]
             err = result.get('error', 'unknown error') if result else 'unknown error'
             return [TextContent(type="text", text=(
@@ -2433,19 +2437,23 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                     [r['url'] for r in created if r.get('url')],
                 )
 
-            # Build response
+            # Build response — every artifact url is a markdown link so the
+            # user can click straight through to DNG. Do NOT collapse these
+            # into a generic "go check DOORS Next" line.
             lines = [
                 f"# Requirements Created in '{project['title']}'\n",
             ]
             if module:
-                lines.append(f"Module: **{module['title']}**  `{module['url']}`")
-            lines.append(f"Folder: **{folder_name}**\n")
-            lines.append(f"Created **{len(created)}** of {len(reqs_data)} requirement(s):\n")
+                lines.append(f"**Module:** [{module['title']}]({module['url']})  ")
+                lines.append(f"  ↳ open this link in your browser to see the module with all its bindings.\n")
+            lines.append(f"**Folder:** {folder_name}\n")
+            lines.append(f"**Created {len(created)} of {len(reqs_data)} requirement(s):**\n")
 
             for i, r in enumerate(created, 1):
-                lines.append(f"{i}. {r['title']}")
                 if r.get('url'):
-                    lines.append(f"   - URL: `{r['url']}`")
+                    lines.append(f"{i}. [{r['title']}]({r['url']})")
+                else:
+                    lines.append(f"{i}. {r['title']}  *(no URL returned)*")
 
             if failed:
                 lines.append(f"\n**Failed ({len(failed)}):**")
@@ -2463,14 +2471,22 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                     added = bind_status.get('added', 0)
                     lines.append(
                         f"\n**Bound to module:** {added} requirement(s) added to "
-                        f"'{module['title']}'. Open the module in DNG to see them in order."
+                        f"[{module['title']}]({module['url']}). Click that link to "
+                        f"see them in order."
                     )
             elif not module:
                 lines.append(
-                    f"\n**Note:** no module_name was provided, so these requirements live in "
-                    f"the folder '{folder_name}' as standalone artifacts. To make them appear "
-                    f"in a navigable document, re-run with `module_name` set, or move them in DNG."
+                    f"\n**Note:** no module_name was provided — these requirements live "
+                    f"in the folder '{folder_name}' as standalone artifacts. To make them "
+                    f"appear in a navigable document, re-run with `module_name` set."
                 )
+
+            lines.append(
+                "\n---\n"
+                "**Surface ALL of the links above to the user as markdown links** — "
+                "do NOT paraphrase to a generic '/rm' landing page URL. Each link "
+                "above goes directly to the specific artifact."
+            )
 
             return [TextContent(type="text", text="\n".join(lines))]
 

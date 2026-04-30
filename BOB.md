@@ -85,6 +85,25 @@ PHASE 4 — DEFECTS (EWM)                     when tests fail
 **Tools subject to this rule:**
 `create_requirements`, `create_module`, `update_requirement`, `update_requirement_attributes`, `create_task`, `create_defect`, `update_work_item`, `transition_work_item`, `create_test_case`, `create_test_script`, `create_test_result`, `create_link`, `create_baseline`, `generate_chart`.
 
+## URL handling — surface direct links, never paraphrase
+
+When a tool returns artifact URLs (modules, requirements, tasks, test cases, defects, anything), **render them as markdown links in the format `[Title](url)`** so the user can click straight through to that artifact in DNG/EWM/ETM.
+
+**❌ NEVER do this:**
+> "View the modules in DOORS Next at: https://goblue.clm.ibmcloud.com/rm"
+
+This is a useless generic landing page. The user has to navigate from there to find what was just created.
+
+**✅ ALWAYS do this:**
+> "Created 3 modules:
+> - [Business Requirements](https://goblue.clm.ibmcloud.com/rm/resources/MD_aaa)
+> - [Stakeholder Requirements](https://goblue.clm.ibmcloud.com/rm/resources/MD_bbb)
+> - [System Requirements](https://goblue.clm.ibmcloud.com/rm/resources/MD_ccc)"
+
+Each tool that creates or modifies an artifact returns the artifact's full URL. Surface it. Don't truncate it. Don't paraphrase. Don't substitute a base-domain URL.
+
+**Same rule for individual requirements** when summarizing what was created — show each as `[REQ Title](url)` so the user can drill in. If there are too many to list (50+), still link the module they're in so the user has a one-click path.
+
 (`generate_chart` is included because picking the wrong chart type, the wrong aggregation, or the wrong slice of data wastes the user's time the same way bad requirements do. Always interview before charting — see "Chart generation" below.)
 
 **Tools NOT subject (read-only — call freely):**
@@ -490,22 +509,23 @@ Preview table with a "Satisfies" column pointing at StRs. Confirm → call `crea
 
 **Phase 4: Confirm + offer downstream**
 
-After all three tiers are created, show a summary:
+After all three tiers are created, show a summary that includes the **direct clickable URL for each module** (you have these from each `create_requirements` response — they're in the `Module:` line). Use markdown link syntax `[Title](url)` so the user can click straight through. **Never** substitute a generic `https://server/rm` landing page link — that's useless to the user.
 
 > "All three tiers created with full traceability:
 >
-> | Tier | Module | Count | Linked to |
+> | Tier | Module (click to open) | Count | Linked to |
 > |---|---|---|---|
-> | Business | Business Requirements | [N] | (top tier) |
-> | Stakeholder | Stakeholder Requirements | [N] | each StR → 1+ BR |
-> | System | System Requirements | [N] | each SR → 1+ StR |
+> | Business | [Business Requirements](https://server/rm/resources/MD_xxx) | [N] | (top tier) |
+> | Stakeholder | [Stakeholder Requirements](https://server/rm/resources/MD_yyy) | [N] | each StR → 1+ BR via Satisfies |
+> | System | [System Requirements](https://server/rm/resources/MD_zzz) | [N] | each SR → 1+ StR via Satisfies |
 >
-> Open the modules in DNG to navigate the hierarchy. The 'Satisfies' link from any artifact takes you up to its parent.
+> Click any module above to open it directly in DNG. The 'Satisfies' link on any individual requirement takes you up to its parent.
 >
 > Do you want me to:
 > 1. **Generate EWM Tasks** for each System Requirement (Phase 4 — implementation)?
 > 2. **Generate ETM Test Cases** for each System Requirement (Phase 5 — verification)?
-> 3. **Both?** 4. **Skip for now.**
+> 3. **Both?**
+> 4. **Skip for now.**
 >
 > Tasks and tests typically link to System Requirements, not Business or Stakeholder — but tell me if you want a different policy."
 
