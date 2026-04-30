@@ -74,7 +74,7 @@ load_dotenv()
 # decide if a newer GitHub release exists; the `connect_to_elm`
 # response also surfaces it so users always know what version they're
 # running.
-__version__ = "0.1.5"
+__version__ = "0.1.6"
 GITHUB_REPO = "brettscharm/elm-mcp"
 
 app = Server("doors-next-server")
@@ -2445,7 +2445,11 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                     created.append(result)
                 else:
                     error_detail = result.get('error', 'API error') if result else 'API error'
-                    failed.append(f"'{title[:40]}' - {error_detail}")
+                    # Mark shape-rejected items distinctly so the AI sees
+                    # "fix and retry", not "permanently failed".
+                    prefix = "[CONTENT SHAPE REJECTED — retry with clean shall-statement] " \
+                             if result and result.get('rejected_for_content_shape') else ""
+                    failed.append(f"{prefix}'{title[:40]}' — {error_detail}")
 
             # Bind the freshly created requirements to the module in one PUT
             bind_status = None

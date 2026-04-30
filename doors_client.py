@@ -1553,6 +1553,53 @@ class DOORSNextClient:
         except Exception:
             return []
 
+    # Section headers that don't belong in a requirement body. Acceptance
+    # criteria + verification steps live in ETM test cases, not in DNG
+    # requirements. Business value + stakeholder needs are project-rationale
+    # context, not part of the "shall" statement. We reject content that
+    # contains these as section headers — the AI can re-emit the requirement
+    # cleanly and put the rest of the content in the right place. Match
+    # against headers only (label + colon at start of a line/paragraph), not
+    # any mention of the words.
+    _BAD_REQ_HEADERS = (
+        "acceptance criteria", "success criteria", "business value",
+        "stakeholder need", "stakeholder needs", "test steps",
+        "pass/fail", "pass / fail", "pass/fail criteria",
+        "verification method", "verification:", "how to verify",
+        "test procedure", "expected result", "expected results",
+    )
+
+    @classmethod
+    def _validate_requirement_content(cls, content: str) -> Optional[str]:
+        """Return an error message if the requirement body contains
+        section headers that belong in test cases / project rationale,
+        not in the requirement itself. None if content is clean."""
+        if not content:
+            return None
+        import re as _re
+        for header in cls._BAD_REQ_HEADERS:
+            # Match the header as a section label: at start of a line or
+            # paragraph break, followed by a colon. Case-insensitive.
+            pattern = r'(?:^|\n)\s*' + _re.escape(header) + r'\s*:'
+            if _re.search(pattern, content, _re.IGNORECASE):
+                return (
+                    f"Requirement body contains a '{header}' section. That "
+                    "doesn't belong in a DNG requirement body — it goes "
+                    "elsewhere:\n"
+                    "  - 'Acceptance Criteria', 'Test Steps', 'Pass/Fail', "
+                    "'Verification', 'Expected Result' → these go in the "
+                    "ETM Test Case for this requirement (call create_test_case "
+                    "after the requirement is created).\n"
+                    "  - 'Business Value', 'Stakeholder Need', 'Success "
+                    "Criteria' → these go in a separate Stakeholder/Business "
+                    "Requirement that the System Requirement traces to (use "
+                    "Step 3g tiered decomposition).\n"
+                    "Re-emit this requirement with just the 'shall' statement "
+                    "(plus an optional 'Rationale:' line for compliance "
+                    "references)."
+                )
+        return None
+
     def create_requirement(self, project_url: str, title: str, content: str,
                            shape_url: str, folder_url: Optional[str] = None,
                            link_uri: Optional[str] = None,
@@ -1561,15 +1608,27 @@ class DOORSNextClient:
 
         Args:
             project_url: The project's service provider URL
-            title: Requirement title            content: Rich text content as plain text (converted to XHTML)
+            title: Requirement title
+            content: Rich text content (plain text or Markdown — converted
+                to XHTML). Validated against _BAD_REQ_HEADERS — content
+                with embedded acceptance-criteria / business-value /
+                stakeholder-needs / verification sections is rejected so
+                those concerns end up in the right artifact (test cases /
+                stakeholder reqs / business reqs).
             shape_url: The artifact type shape URL (e.g., System Requirement)
             folder_url: Optional folder URL to place the artifact in
             link_uri: Optional link type URI (e.g., a Satisfies link type URL)
             link_target_url: Optional target requirement URL to link to
 
         Returns:
-            Dict with 'title' and 'url' of created requirement, or None on failure.
+            Dict with 'title' and 'url' of created requirement, or
+            {'error': ...} on failure (including content validation rejection).
         """
+        # Reject mis-shaped requirements before they hit DNG.
+        validation_error = self._validate_requirement_content(content)
+        if validation_error:
+            return {'error': validation_error, 'rejected_for_content_shape': True}
+
         self._ensure_auth()
         project_area_id = self._extract_project_area_id(project_url)
         project_area_url = f"{self.base_url}/process/project-areas/{project_area_id}"
@@ -1673,6 +1732,12 @@ class DOORSNextClient:
 
         if not title and not content:
             return {'error': 'Nothing to update — provide title and/or content'}
+
+        # Reject mis-shaped content same as create_requirement does.
+        if content:
+            validation_error = self._validate_requirement_content(content)
+            if validation_error:
+                return {'error': validation_error, 'rejected_for_content_shape': True}
 
         # Step 1: GET the current requirement to obtain ETag and existing data
         try:

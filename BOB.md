@@ -184,36 +184,99 @@ The READ path is for pulling existing requirements out of DNG. Reading is non-de
 **Why the filter matters:** if the user says "I want to develop the implementation based on the approved requirements," you absolutely should NOT then call `get_module_requirements` with no filter and pull every draft / proposed / rejected req. Filter to `{"Status": "Approved"}` (or whatever the project's "approved" state is called) and only feed those to downstream tools.
 
 ### Step 3b: GENERATE REQUIREMENTS Path
-If the user wants to generate requirements, DO NOT start generating immediately. Follow this interview process:
 
-**Phase 1: Understand what they need**
+The flow is **interview → generate → preview-with-structure → confirm → push**. Critically: generate first, THEN propose the module structure with the requirements visible. Don't pre-commit to a single module name before you know what you're generating — sometimes the right answer is to split the result into 2-3 modules grouped by theme.
 
-Ask these questions one at a time (not all at once). Wait for each answer before asking the next. **Do NOT call any create tool until Phase 2's preview is shown and the user has explicitly approved.** This rule is repeated in every write tool's description for a reason — it's the most-violated rule and the AI's reflex to "just do it" is wrong.
+**Phase 1: Light interview about WHAT (not WHERE) — one question at a time**
+
+Wait for each answer before asking the next. **Do NOT call any create tool yet.** This rule is repeated in every write tool's description because it's the most-violated rule.
 
 1. > "What system or feature are these requirements for? Give me a brief description."
 
-2. > "What type of requirements are we writing? For example: stakeholder, system-level, software, hardware, security, performance, etc."
+2. > "What type of requirements are we writing? Stakeholder, system-level, software, hardware, security, performance, safety, etc.?"
 
-3. > "Are there any applicable standards, regulations, or compliance frameworks? For example: DO-178C, ISO 26262, IEC 62304, NIST 800-53, MIL-STD-882, or industry-specific standards."
+3. > "Are there applicable standards or compliance frameworks? DO-178C, ISO 26262, IEC 62304, NIST 800-53, MIL-STD-882, or industry-specific?"
 
-4. > "How many requirements are you looking for? A handful (5-10) or a more comprehensive set (20+)?"
+4. > "How many requirements are you looking for? A handful (5-10), moderate (15-25), or comprehensive (30+)?"
 
-5. > "**Where should I put them?** Three options:
-   > - **New module** — I'll create one and bind the requirements to it. Suggest a name based on what we just discussed, or you tell me.
-   > - **Existing module** — I'll list the modules in this project; you pick one and I'll add to it.
-   > - **Folder only, no module** — requirements are created as standalone artifacts (not in a navigable document). Pick this only if you have a reason; module-bound is usually what you want.
-   >
-   > Which one?"
+5. > "Anything specific that must be included? Any constraints, interfaces, environmental conditions, or existing requirements I should be aware of?"
 
-   - If "existing module" → call `get_modules(project_identifier)`, present the list numbered, let the user pick. Then resolve the picked module's NAME and use it as `module_name` in `create_requirements` (the tool finds-or-creates by name, so existing modules get reused).
-   - If "new module" → propose a name. Confirm before generating.
-   - If "folder only" → leave `module_name` unset; pass only `folder_name`.
+6. > "Should these link upstream to existing artifacts (e.g. derive from / satisfy a parent requirement)? If yes, paste the URL of the parent or tell me the link type."
 
-6. > "Is there anything specific that must be included? Any constraints, interfaces, environmental conditions, or existing requirements I should be aware of?"
+(Notice: NO "where to put them" question yet — that comes after generation.)
 
-7. > "Should these requirements link to any existing artifacts? For example, if these are system requirements that satisfy stakeholder requirements, I can create Satisfies or Elaborated By links. What link type should I use, or should I skip linking?"
+**Phase 2: Generate the requirements internally**
 
-**Phase 2: Generate using proper requirements engineering practices**
+Generate them silently — do NOT show the user yet. Just have the list ready in memory. Then think about structure:
+
+- Are these requirements all about ONE topic? → one module is right.
+- Do they naturally split into themes (e.g. Authentication / Authorization / Encryption when the user asked for "security")? → propose multiple modules with grouped reqs.
+- Do they decompose into hierarchies (Business → Stakeholder → System)? → that's Step 3g (Tiered) — different flow.
+
+**Phase 3: Preview with the proposed structure — STOP here, do not write anything yet**
+
+Show the user EVERYTHING in one shot: the requirements, AND the module structure that will house them, AND the rationale for the grouping. Format:
+
+> Here are the **[N] requirements** I'd create in **[project name]**, organized into **[K] module(s)**:
+>
+> ## Module 1: **[Module name]** ([n₁] requirements)
+> *Rationale for this grouping: [one line — why these belong together]*
+>
+> | # | Type | Title (the "shall" statement) | Rationale |
+> |---|------|-------------------------------|-----------|
+> | 1 | Heading | [Section heading] | Section grouping. |
+> | 2 | System Requirement | The system shall ... | [why this is needed] |
+> | ... | ... | ... | ... |
+>
+> ## Module 2: **[Module name]** ([n₂] requirements)
+> *Rationale: ...*
+>
+> | # | Type | Title | Rationale |
+> | ... | ... | ... | ... |
+>
+> **Now decide:**
+> 1. **Approve as proposed** — reply "yes" / "go ahead" / "push them".
+> 2. **Restructure** — tell me what to change: rename a module, move req X from module A to module B, merge two modules, split one module, drop a req, add a req.
+> 3. **Or pick from these alternative placements:**
+>    - **Reuse an existing module** — I'll list the project's modules, you pick one (and the existing module's name overrides the proposed one).
+>    - **Folder only, no module** — for ad-hoc requirements that don't need a navigable doc.
+>
+> Note: I haven't written anything to ELM yet. Test cases (with verification steps & pass/fail criteria) come in a separate step linked to each requirement; they're NOT inside the requirement bodies.
+
+**Phase 4: Apply user feedback, re-preview if needed, then push**
+
+If the user says "restructure" or names changes:
+- Apply the changes to your in-memory list (move reqs, rename modules, drop/add).
+- **Re-show the updated preview.** Do NOT call any create tool yet.
+- Repeat until the user gives explicit approval.
+
+If the user picks "existing module":
+- Call `get_modules(project_identifier)` → present numbered list → user picks → use that module's title as `module_name`. The find-or-create logic in `create_requirements` reuses existing modules cleanly.
+
+Once the user explicitly approves ("yes", "ship it", "push them"):
+- For each module group, call `create_requirements` with the project_identifier, module_name (or omit for folder-only), folder_name (defaulting to module name), and the requirements array.
+- If multiple modules, call create_requirements once per module — they're independent operations.
+
+**Phase 5 (was Phase 3): Confirm delivery + offer the natural next steps**
+
+After all `create_requirements` calls succeed, tell the user:
+> "Done — created [total N] requirements across [K] module(s) in [project name]:
+> - [Module 1 name](module-1-direct-url): [n₁] requirements
+> - [Module 2 name](module-2-direct-url): [n₂] requirements
+>
+> Each requirement is a clean 'shall' statement; verification details aren't in them yet.
+>
+> Want me to:
+> 1. **Generate EWM Tasks** — one implementation Task per requirement, linked back via `oslc_cm:implementsRequirement` (Phase 2 of the lifecycle)?
+> 2. **Generate ETM Test Cases** — one Test Case per requirement, linked via `oslc_qm:validatesRequirement`, with the test steps and pass/fail criteria that go with each requirement (Phase 3 of the lifecycle)?
+> 3. **Both?**
+> 4. **Skip for now**.
+>
+> Pick a number — and if you want tasks/tests, I'll do another short interview before generating, same as we just did for requirements."
+
+Render every URL as a clickable markdown link so the user can jump straight into DNG. Never substitute the generic `/rm` landing page.
+
+**Phase 6 (was: rules): Generate the proper requirements engineering style**
 
 When generating requirements, follow these rules from IEEE 29148 and INCOSE best practices:
 
