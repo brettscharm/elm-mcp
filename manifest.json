@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "elm-mcp",
   "display_name": "ELM MCP",
-  "version": "0.1.15",
+  "version": "0.2.0",
   "description": "MCP server for IBM Engineering Lifecycle Management (ELM) — DOORS Next, EWM, ETM, GCM, and SCM/code-review — driven by AI assistants like Claude, IBM Bob, Cursor, and VS Code.",
   "long_description": "Talk to IBM ELM from any MCP-speaking AI assistant. Read and write requirements (with rich text, tables, images), create modules with auto-bound requirements, transition work items through their workflow, query work items with OSLC filters, create defects, link any two artifacts, inspect change-sets and code reviews, and chart your ELM data. 40 tools covering the full requirements-to-test lifecycle, plus a phase-gated /build-project workflow that takes you from idea to running code with explicit user-approval gates between phases. Personal passion project — not an official IBM product. Use at your own risk.",
   "author": {

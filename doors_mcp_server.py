@@ -74,7 +74,7 @@ load_dotenv()
 # decide if a newer GitHub release exists; the `connect_to_elm`
 # response also surfaces it so users always know what version they're
 # running.
-__version__ = "0.1.15"
+__version__ = "0.2.0"
 GITHUB_REPO = "brettscharm/elm-mcp"
 
 app = Server("doors-next-server")
@@ -315,10 +315,64 @@ _client_error: str = ""
 _RUNS: Dict[str, Dict] = {}
 
 
+def _runs_dir() -> str:
+    """Disk location for persisted run state. Created on first write."""
+    home = os.path.expanduser("~")
+    d = os.path.join(home, ".elm-mcp", "runs")
+    try:
+        os.makedirs(d, exist_ok=True)
+    except OSError:
+        pass
+    return d
+
+
+def _persist_run(run: Dict) -> None:
+    """Write a run's current state to disk so it survives server
+    restart. Best-effort — disk failures are logged but don't block
+    the in-memory operation."""
+    try:
+        import json as _json
+        path = os.path.join(_runs_dir(), f"{run['run_id']}.json")
+        tmp = path + ".tmp"
+        with open(tmp, "w") as f:
+            _json.dump(run, f, indent=2)
+        os.replace(tmp, path)
+    except Exception as e:
+        sys.stderr.write(f"[elm-mcp] failed to persist run {run.get('run_id')}: {e}\n")
+
+
+def _load_runs_from_disk() -> int:
+    """Load any persisted runs into _RUNS at startup. Returns the
+    number loaded. Silently skips unreadable / corrupt files."""
+    import json as _json
+    count = 0
+    try:
+        d = _runs_dir()
+        if not os.path.isdir(d):
+            return 0
+        for name in os.listdir(d):
+            if not name.endswith(".json"):
+                continue
+            path = os.path.join(d, name)
+            try:
+                with open(path) as f:
+                    run = _json.load(f)
+                rid = run.get("run_id")
+                if rid:
+                    _RUNS[rid] = run
+                    count += 1
+            except Exception:
+                continue
+    except OSError:
+        pass
+    return count
+
+
 def _new_run(command: str, project_idea: str = "",
              tier_mode: str = "single", project_urls: Optional[Dict] = None) -> Dict:
     """Create a new build-project run and register it. Returns the new
-    run dict (caller can mutate; changes persist in _RUNS by reference)."""
+    run dict (caller can mutate; changes persist in _RUNS by reference
+    AND on disk via _persist_run)."""
     import uuid as _uuid
     import datetime as _dt
     run_id = _uuid.uuid4().hex[:10]
@@ -342,8 +396,10 @@ def _new_run(command: str, project_idea: str = "",
         },
         "approval_signals": {},
         "drift": None,
+        "dng_state_artifact_url": "",  # set if/when DNG-resident state is enabled
     }
     _RUNS[run_id] = run
+    _persist_run(run)
     return run
 
 
@@ -353,9 +409,10 @@ def _get_run(run_id: str) -> Optional[Dict]:
 
 
 def _touch_run(run: Dict) -> None:
-    """Update last_updated_at on the run."""
+    """Update last_updated_at on the run, then persist to disk."""
     import datetime as _dt
     run["last_updated_at"] = _dt.datetime.utcnow().isoformat() + "Z"
+    _persist_run(run)
 
 
 def _record_artifact_in_run(run: Dict, kind: str, url: str, title: str,
@@ -388,6 +445,66 @@ def _list_active_runs() -> List[Dict]:
         }
         for r in _RUNS.values()
     ]
+
+
+def _render_run_as_markdown(run: Dict) -> str:
+    """Render a run's state as a human-readable markdown document.
+    Used for the DNG-resident state artifact body and (optionally) for
+    user-facing summaries. The body is recognizable to humans browsing
+    DNG, and machine-parseable enough that a teammate's Bob session can
+    re-fetch it and reconstruct what was built."""
+    arts = run.get("artifacts", {}) or {}
+    lines = [
+        f"# Build State: {run.get('project_idea', '?')}",
+        "",
+        f"**Run ID:** `{run.get('run_id', '?')}`",
+        f"**Command:** {run.get('command', 'unknown')}",
+        f"**Current phase:** {run.get('current_phase', 0)}",
+        f"**Tier mode:** {run.get('tier_mode', 'single')}",
+        f"**Started:** {run.get('started_at', '')}",
+        f"**Last updated:** {run.get('last_updated_at', '')}",
+        "",
+        "## Project URLs",
+    ]
+    urls = run.get("project_urls", {}) or {}
+    for k in ("dng", "ewm", "etm"):
+        v = urls.get(k, "")
+        lines.append(f"- {k.upper()}: {v if v else '_(not set)_'}")
+
+    lines.append("")
+    lines.append("## Artifacts created")
+    for kind in ("modules", "requirements", "tasks", "tests", "child_workitems"):
+        items = arts.get(kind, []) or []
+        if not items:
+            continue
+        lines.append(f"### {kind} ({len(items)})")
+        for it in items:
+            lines.append(f"- [{it.get('title', '?')}]({it.get('url', '')})")
+
+    sigs = run.get("approval_signals", {}) or {}
+    if sigs:
+        lines.append("")
+        lines.append("## Approval signals received per phase")
+        for ph in sorted(sigs.keys(), key=lambda x: float(x)):
+            lines.append(f"- Phase {ph}: \"{sigs[ph]}\"")
+
+    drift = run.get("drift")
+    if drift:
+        lines.append("")
+        lines.append("## Drift detected at Phase 6")
+        lines.append(f"- unchanged: {drift.get('unchanged', 0)}")
+        lines.append(f"- modified: {drift.get('modified', [])}")
+        lines.append(f"- deleted: {drift.get('deleted', [])}")
+        lines.append(f"- added externally: {drift.get('added_externally', [])}")
+
+    return "\n".join(lines)
+
+
+# Load any persisted runs at module import time (after the helpers are
+# defined). Quiet on first-run (empty dir).
+_loaded_run_count = _load_runs_from_disk()
+if _loaded_run_count > 0:
+    sys.stderr.write(f"[elm-mcp] loaded {_loaded_run_count} run(s) from disk\n")
 
 
 def _get_or_create_client() -> Optional[DOORSNextClient]:
@@ -1744,6 +1861,60 @@ async def list_tools() -> list[Tool]:
                 "type": "object",
                 "properties": {
                     "run_id": {"type": "string", "description": "Run id from build_new_project / build_from_existing / build_project."}
+                },
+                "required": ["run_id"]
+            }
+        ),
+        Tool(
+            name="build_project_resume",
+            description=(
+                "Pick up an in-progress build run after a break, a Bob restart, "
+                "or even on a different machine (state persists to disk at "
+                "~/.elm-mcp/runs/<run_id>.json). Without arguments, lists all "
+                "resumable runs and asks the user which one. With run_id, "
+                "loads that specific run, summarizes current state, and "
+                "returns instructions for continuing from the right phase. "
+                "Read-only — doesn't modify ELM."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "run_id": {"type": "string", "description": "Run id to resume (optional). If omitted, lists all resumable runs."}
+                },
+                "required": []
+            }
+        ),
+        Tool(
+            name="publish_build_state_to_dng",
+            description=(_WRITE_GATE +
+                "Write (or update) a build run's current state as a DNG "
+                "artifact, so teammates can see where you are in the build "
+                "and pick it up themselves. The artifact is named "
+                "`[BOB-BUILD-STATE] <project idea>` and lives in any module "
+                "the user picks (or a default 'AI Build State' module). "
+                "Updates idempotently — re-calling overwrites the body with "
+                "the latest state, preserving the same artifact URL across "
+                "phases. After phase changes, build_project_next can call "
+                "this automatically if the run already has a "
+                "dng_state_artifact_url. Use this when the user wants "
+                "cross-team handoff visibility (Brett starts a build, Sarah "
+                "opens DNG, sees the cursor, picks it up)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "run_id": {
+                        "type": "string",
+                        "description": "Run id from build_new_project / build_from_existing / build_project."
+                    },
+                    "module_url": {
+                        "type": "string",
+                        "description": "DNG module URL to write the artifact into. Optional — if not provided and the run already has a dng_state_artifact_url, the existing artifact is updated."
+                    },
+                    "shape_url": {
+                        "type": "string",
+                        "description": "Optional artifact shape URL. If omitted, uses System Requirement (any shape works — body is the deliverable, not the type)."
+                    }
                 },
                 "required": ["run_id"]
             }
@@ -3382,6 +3553,248 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                 lines.append(f"- added externally: {drift.get('added_externally', [])}")
                 lines.append("")
             return [TextContent(type="text", text="\n".join(lines))]
+
+        # ── build_project_resume ──────────────────────────────────
+        if name == "build_project_resume":
+            run_id = (arguments.get("run_id") or "").strip()
+            if not run_id:
+                runs = _list_active_runs()
+                if not runs:
+                    return [TextContent(type="text", text=(
+                        "No resumable build runs found. State is persisted to "
+                        "`~/.elm-mcp/runs/` so previously-active runs survive "
+                        "Bob restart. If you expected runs here:\n"
+                        "  - Check `~/.elm-mcp/runs/` for `*.json` files\n"
+                        "  - Make sure you're using the same install of "
+                        "elm-mcp as last time\n\n"
+                        "To start fresh, call `build_new_project` (greenfield) "
+                        "or `build_from_existing` (brownfield)."
+                    ))]
+                # Sort by last_updated_at descending so most-recent shows first
+                runs.sort(key=lambda r: r.get('last_updated_at', ''), reverse=True)
+                lines = [f"# Resumable build runs ({len(runs)})", ""]
+                for r in runs:
+                    lines.append(
+                        f"- **`{r['run_id']}`** [{r['command']}] phase={r['phase']}\n"
+                        f"  - idea: {r['idea']}\n"
+                        f"  - last update: {r['last_updated_at'][:19]}"
+                    )
+                lines.append("")
+                lines.append(
+                    "Tell the user about each run and ask which they want to "
+                    "resume. Then call `build_project_resume(run_id=<id>)` to "
+                    "load that one's state and get the next-phase instructions."
+                )
+                return [TextContent(type="text", text="\n".join(lines))]
+
+            run = _get_run(run_id)
+            if not run:
+                # Try one more time from disk in case the run was created
+                # by a different server process
+                _load_runs_from_disk()
+                run = _get_run(run_id)
+            if not run:
+                return [TextContent(type="text", text=(
+                    f"Run `{run_id}` not found in memory or on disk. "
+                    f"Check `~/.elm-mcp/runs/` to see what's available, or "
+                    f"call `build_project_resume()` (no arg) to list active runs."
+                ))]
+
+            current_phase = run.get('current_phase', 0)
+            arts = run.get('artifacts', {}) or {}
+            counts = {k: len(v) for k, v in arts.items()}
+
+            # Figure out the natural next action based on current phase
+            if current_phase == 0:
+                next_action = (
+                    "The run hasn't progressed past Phase 0 (project setup). "
+                    "Continue by completing Phase 1's intake interview, then "
+                    "call `build_project_next(current_phase=1, ..., run_id="
+                    f"\"{run_id}\")`."
+                )
+            elif current_phase >= 9:
+                next_action = (
+                    "The run completed Phase 9 (final summary). It's done — "
+                    "no further phases. Use `generate_traceability_matrix("
+                    f"run_id=\"{run_id}\")` to view the matrix again, or "
+                    "`build_project_status` for the full state dump."
+                )
+            else:
+                next_action = (
+                    f"The run is at Phase {current_phase}. To continue: "
+                    f"address whatever was pending at that phase, get the "
+                    f"user's verbatim approval signal, then call "
+                    f"`build_project_next(current_phase={current_phase}, "
+                    f"user_signal=<their reply>, run_id=\"{run_id}\")`."
+                )
+
+            return [TextContent(type="text", text=(
+                f"# Resumed run `{run['run_id']}`\n\n"
+                f"**Project:** {run.get('project_idea', '?')}\n"
+                f"**Command:** {run.get('command', 'unknown')}\n"
+                f"**Current phase:** {current_phase}\n"
+                f"**Tier mode:** {run.get('tier_mode', 'single')}\n"
+                f"**Started:** {run.get('started_at', '')}\n"
+                f"**Last update:** {run.get('last_updated_at', '')}\n\n"
+                f"## Artifacts so far\n"
+                f"- modules: {counts.get('modules', 0)}\n"
+                f"- requirements: {counts.get('requirements', 0)}\n"
+                f"- tasks: {counts.get('tasks', 0)}\n"
+                f"- tests: {counts.get('tests', 0)}\n"
+                f"- child workitems: {counts.get('child_workitems', 0)}\n\n"
+                f"## What to do next\n\n"
+                f"{next_action}\n\n"
+                f"**Tell the user a brief summary** (project, phase, artifact "
+                f"counts) then ask if they want to continue from where they "
+                f"left off — or start over fresh."
+            ))]
+
+        # ── publish_build_state_to_dng ────────────────────────────
+        if name == "publish_build_state_to_dng":
+            run_id = (arguments.get("run_id") or "").strip()
+            module_url = (arguments.get("module_url") or "").strip()
+            shape_url = (arguments.get("shape_url") or "").strip()
+
+            if not run_id:
+                return [TextContent(type="text", text="Error: run_id is required.")]
+            run = _get_run(run_id)
+            if not run:
+                return [TextContent(type="text", text=(
+                    f"Run `{run_id}` not found. Active: "
+                    f"{[r['run_id'] for r in _list_active_runs()] or 'none'}"
+                ))]
+
+            existing_artifact_url = run.get('dng_state_artifact_url', '')
+            body = _render_run_as_markdown(run)
+            title = f"[BOB-BUILD-STATE] {run.get('project_idea', '?')[:60]} ({run_id})"
+
+            if existing_artifact_url:
+                # Update existing artifact
+                try:
+                    upd = client.update_requirement(
+                        existing_artifact_url,
+                        title=title,
+                        content=body,
+                    )
+                except AttributeError:
+                    upd = {'error': 'client lacks update_requirement'}
+                if upd and 'error' not in upd:
+                    return [TextContent(type="text", text=(
+                        f"# Build state updated in DNG\n\n"
+                        f"Updated [{title}]({existing_artifact_url}) with "
+                        f"current run state. Teammates can open the link to "
+                        f"see where the build stands."
+                    ))]
+                err = upd.get('error', 'unknown') if upd else 'unknown'
+                return [TextContent(type="text", text=(
+                    f"Couldn't update existing artifact at "
+                    f"{existing_artifact_url}: {err}. The run was modified in "
+                    f"memory but not synced to DNG. Try with a fresh "
+                    f"module_url to create a new artifact."
+                ))]
+
+            # Create new artifact
+            if not module_url:
+                # Need a target. Try to use the run's DNG project_url to find/create an "AI Build State" module.
+                dng_url = (run.get('project_urls') or {}).get('dng', '')
+                if not dng_url:
+                    return [TextContent(type="text", text=(
+                        "Error: no module_url provided and the run has no "
+                        "DNG project URL recorded. Pass `module_url` to a "
+                        "module where the build-state artifact should live "
+                        "(typically a dedicated 'AI Build State' module)."
+                    ))]
+                # First try to find existing module by name
+                try:
+                    existing_mods = client.get_modules(dng_url) or []
+                    target = next(
+                        (m for m in existing_mods
+                         if m.get('title', '').strip().lower() == 'ai build state'),
+                        None,
+                    )
+                    if target:
+                        module_url = target.get('url', '')
+                    else:
+                        # Create the module
+                        new_mod = client.create_module(dng_url, "AI Build State",
+                                                        "Auto-created by elm-mcp to track build-project run state for cross-team handoff.")
+                        if new_mod and 'error' not in new_mod:
+                            module_url = new_mod.get('url', '')
+                except Exception as e:
+                    return [TextContent(type="text", text=(
+                        f"Error: could not find or create 'AI Build State' "
+                        f"module: {e}"
+                    ))]
+
+            if not module_url:
+                return [TextContent(type="text", text=(
+                    "Error: could not resolve a target module for the "
+                    "build-state artifact. Pass module_url explicitly."
+                ))]
+
+            # Resolve shape if not provided — pick System Requirement (any
+            # shape works; this is just metadata wrapping a markdown body)
+            dng_url = (run.get('project_urls') or {}).get('dng', '')
+            if not shape_url and dng_url:
+                try:
+                    shapes = client.get_artifact_shapes(dng_url) or []
+                    sysreq = next(
+                        (s for s in shapes
+                         if 'system requirement' in s.get('name', '').lower()),
+                        None,
+                    )
+                    if sysreq:
+                        shape_url = sysreq.get('url', '')
+                    elif shapes:
+                        shape_url = shapes[0].get('url', '')
+                except Exception:
+                    pass
+
+            if not shape_url:
+                return [TextContent(type="text", text=(
+                    "Error: could not resolve an artifact shape for the "
+                    "build-state artifact. Pass shape_url explicitly."
+                ))]
+
+            # Create the artifact in the module via create_requirements with module_name path,
+            # then set dng_state_artifact_url on the run for future updates.
+            try:
+                # We use create_requirement (singular) on client to write atomically
+                # without going through the create_requirements aggregator.
+                new_art = client.create_requirement(
+                    project_url=dng_url,
+                    title=title,
+                    content=body,
+                    shape_url=shape_url,
+                )
+            except Exception as e:
+                return [TextContent(type="text", text=(
+                    f"Error: failed to create build-state artifact: {e}"
+                ))]
+
+            if new_art and 'error' not in new_art:
+                art_url = new_art.get('url', '')
+                run['dng_state_artifact_url'] = art_url
+                _persist_run(run)
+                # Try to bind into the module so it shows up there
+                try:
+                    client.add_to_module(module_url, [art_url])
+                except Exception:
+                    pass
+                return [TextContent(type="text", text=(
+                    f"# Build state published to DNG\n\n"
+                    f"Created [{title}]({art_url}) in module {module_url}\n\n"
+                    f"Teammates can open this URL anytime to see the build's "
+                    f"current state — phase, artifacts, drift, approval "
+                    f"history. The artifact will be updated in place after "
+                    f"each subsequent phase. Pass it as `dng_state_artifact_url` "
+                    f"in `build_project_resume(run_id=...)` to recover state "
+                    f"from any machine.\n\n"
+                    f"_Run state now has `dng_state_artifact_url` set; future "
+                    f"`publish_build_state_to_dng` calls update in place._"
+                ))]
+            err = new_art.get('error', 'unknown') if new_art else 'unknown'
+            return [TextContent(type="text", text=f"Error: {err}")]
 
         # ── generate_traceability_matrix ──────────────────────────
         if name == "generate_traceability_matrix":
@@ -5530,7 +5943,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
 # ── Main ──────────────────────────────────────────────────────
 
 async def main():
-    logger.info(f"IBM ELM MCP Server v{__version__} starting (51 tools, 9 prompts, 3 resource templates)")
+    logger.info(f"IBM ELM MCP Server v{__version__} starting (53 tools, 9 prompts, 3 resource templates)")
     async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
         await app.run(read_stream, write_stream, app.create_initialization_options())
 
