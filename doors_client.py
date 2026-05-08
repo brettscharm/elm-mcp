@@ -1478,12 +1478,23 @@ class DOORSNextClient:
                     headers={'Accept': 'application/rdf+xml'},
                     timeout=self._TIMEOUT,
                 )
-                stream_match = re.search(
+                # CRITICAL (v0.5.7): the configurations endpoint returns
+                # multiple rdfs:members — typically a STREAM (writable)
+                # plus zero-to-many BASELINES (read-only snapshots). Older
+                # code grabbed the first match, which on some servers is a
+                # baseline. PUTting against a baseline returns HTTP 410
+                # Gone, which then makes the structure-URL discovery fail
+                # silently. Always prefer the /cm/stream/ URL; fall back
+                # to first member only if no stream is present (very rare).
+                all_members = re.findall(
                     r'rdfs:member\s+rdf:resource="([^"]+)"', cfg_resp.text)
-                if not stream_match:
+                stream_url = next(
+                    (u for u in all_members if '/cm/stream/' in u), None)
+                if not stream_url and all_members:
+                    stream_url = all_members[0]
+                if not stream_url:
                     return {'error': 'Could not discover active stream for this component',
                             'module_url': module_url}
-                stream_url = stream_match.group(1)
         except Exception as e:
             return {'error': f'Component/stream discovery failed: {e}',
                     'module_url': module_url}

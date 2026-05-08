@@ -74,7 +74,7 @@ load_dotenv()
 # decide if a newer GitHub release exists; the `connect_to_elm`
 # response also surfaces it so users always know what version they're
 # running.
-__version__ = "0.5.6"
+__version__ = "0.5.7"
 GITHUB_REPO = "brettscharm/elm-mcp"
 
 app = Server("elm-mcp")
