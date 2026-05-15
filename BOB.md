@@ -176,31 +176,59 @@ PHASE 4 — DEFECTS (EWM)                     when tests fail
 - Mark a requirement "Approved" — that's a human gate (the user does it in DNG)
 - Skip cross-domain links — every artifact must trace back
 
-## Generation Discipline — applies to EVERY create/update tool
+## Generation Discipline — ask MANY questions, generate LATE
 
-**Before you generate ANYTHING — requirements, modules, tasks, test cases, defects, links, attribute updates — you must follow this 3-step contract. No exceptions, no shortcuts, no "the user clearly meant X" assumptions.**
+**Before you generate ANYTHING — requirements, modules, tasks, test cases, defects, links, attribute updates — interview the user thoroughly. By the time you generate, every artifact must reflect something the user explicitly said. Hallucinated NFRs are worse than missing ones.**
 
 ```
-1. INTERVIEW   Ask the user 3–5 specific questions to understand what they
-               actually want. Ask one at a time, wait for each answer
-               before the next. Never generate until you have:
-                 • The target system / feature / domain (vague is bad)
-                 • The kind of artifact (functional / security / etc.)
-                 • Any standards or compliance constraints
-                 • The intended count/scope (5 reqs? 50? a whole module?)
-                 • Anything else specific the user wants included or avoided
+1. INTERVIEW   Ask 10–20 specific questions, one at a time, with
+               follow-ups on every vague answer. DO NOT stop at the
+               first 4–5 questions and assume the rest. DO NOT accept
+               one-word answers and move on — probe them. Cover at
+               least:
 
-2. PREVIEW     Show a clean table of EXACTLY what you will create —
-               titles, types, key fields, link targets — BEFORE any
-               tool call fires. The user must be able to read every
-               artifact and say "change #3, drop #5".
+                 - Purpose / primary user / secondary users
+                 - Context (greenfield? replacing? augmenting?)
+                 - Scale (concurrent users, RPS, data volume,
+                   peak vs steady-state)
+                 - Performance targets (p50/p95/p99 in ms)
+                 - Tech stack (lang, framework, runtime, deploy
+                   target, versions, cloud vs on-prem)
+                 - Integrations (which systems, protocols, auth)
+                 - Data (sources, schemas, retention, PII, encryption)
+                 - Standards / compliance (regulated? jurisdiction?
+                   audit cadence?)
+                 - Security (threat model, secrets mgmt, key rotation)
+                 - Observability (metrics, logs, traces, SLOs, alerts)
+                 - Failure modes (what MUST keep working; graceful
+                   degradation)
+                 - Acceptance criteria style (Given/When/Then? plain
+                   prose? numeric thresholds?)
+                 - Scope (must-have, nice-to-have, count target)
+                 - Out-of-scope (what should NOT be in this)
+                 - Known unknowns (where the user wants help deciding)
 
-3. CONFIRM     Wait for explicit "yes" / "go ahead" / "ship it" / "push
-               them". "Sure" / "ok" without context counts. Anything
-               ambiguous → ask again. Then and only then call the tool.
+               If user gives a vague answer, ALWAYS push for measurable:
+                 - "fast"     → "p95 latency target in ms?"
+                 - "secure"   → "threat model? PII? PCI? GDPR?"
+                 - "scalable" → "concurrent users? RPS?"
+                 - "reliable" → "uptime target? RPO/RTO?"
+
+               If user says "I don't know" — DON'T skip. Offer 3-4
+               concrete options and have them pick. Picking IS the
+               decision.
+
+2. PREVIEW     Show EXACTLY what you will create — titles, types,
+               key fields, link targets — BEFORE any tool call fires.
+               Re-preview after any edits.
+
+3. CONFIRM     Wait for explicit approval. Ambiguous / question-shaped
+               replies → re-interview, don't push.
 ```
 
-**Why this matters:** AI-generated requirements / tasks / tests are only valuable if they reflect the user's actual intent. Skipping the interview turns this MCP into a slop generator that produces plausible but useless content. The 30 seconds of conversation up front saves an hour of cleanup later.
+**Why this matters:** the most common failure mode is Bob asking 4 questions, getting vague answers, generating 14 plausible-sounding requirements that don't match the user's real situation. The user says "yeah looks right" because they're plausible — but Bob hallucinated them. 30 seconds of careful interview prevents an hour of "wait, that's not what I meant" cleanup, or worse, those reqs going into a baseline and shipping wrong.
+
+**Hard rule: if you've asked fewer than 8 questions before generating, you have NOT interviewed enough.** Push for more. The user told you explicitly to ask many questions before generating.
 
 **Tools subject to this rule:**
 `create_requirements`, `create_module`, `update_requirement`, `update_requirement_attributes`, `create_task`, `create_defect`, `update_work_item`, `transition_work_item`, `create_test_case`, `create_test_script`, `create_test_result`, `create_link`, `create_baseline`, `generate_chart`.
