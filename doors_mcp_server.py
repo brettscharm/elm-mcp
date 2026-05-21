@@ -74,7 +74,7 @@ load_dotenv()
 # decide if a newer GitHub release exists; the `connect_to_elm`
 # response also surfaces it so users always know what version they're
 # running.
-__version__ = "0.8.0"
+__version__ = "0.8.1"
 GITHUB_REPO = "brettscharm/elm-mcp"
 
 app = Server("elm-mcp")
@@ -1028,6 +1028,49 @@ async def list_prompts() -> list[Prompt]:
             ],
         ),
         Prompt(
+            name="import-jira",
+            description=(
+                "Live Jira import — pulls a Jira issue via the Atlassian "
+                "MCP server (must be installed alongside elm-mcp), runs "
+                "interview discipline on the ticket body, creates DNG "
+                "requirements with a `Source: JIRA-XXX` back-reference "
+                "stamped per req, and posts a Jira comment listing the "
+                "created DNG URLs. Bidirectional traceability via two peer "
+                "MCP servers — elm-mcp and Atlassian MCP — orchestrated by "
+                "the LLM, not by MCP-to-MCP calls. Falls back to suggesting "
+                "/import-requirements (paste) or /import-work-item (PDF) if "
+                "the Atlassian MCP isn't connected. See BOB.md Step 3l for "
+                "the full playbook."
+            ),
+            arguments=[
+                PromptArgument(
+                    name="issue_key",
+                    description="Jira issue key like 'PROJ-123' OR a full Atlassian URL like 'https://yourorg.atlassian.net/browse/PROJ-123'. Optional — AI will ask if not provided.",
+                    required=False,
+                ),
+                PromptArgument(
+                    name="cloud_id",
+                    description="Atlassian cloud ID. Optional — AI calls Atlassian MCP's `getAccessibleAtlassianResources` to discover it.",
+                    required=False,
+                ),
+                PromptArgument(
+                    name="dng_project",
+                    description="DNG project where the requirements module should be created. Optional — AI uses the currently-connected project or asks.",
+                    required=False,
+                ),
+                PromptArgument(
+                    name="module_name",
+                    description="Name for the new DNG module. Optional — AI suggests one based on the Jira ticket's summary if not provided.",
+                    required=False,
+                ),
+                PromptArgument(
+                    name="walk_graph",
+                    description="'parent' (also pull parent epic), 'children' (also pull child stories — useful for epics), 'both', or 'none'. Optional — default is to ask the user when ambiguous.",
+                    required=False,
+                ),
+            ],
+        ),
+        Prompt(
             name="build-new-project",
             description=(
                 "Greenfield agentic build — start from a one-line idea, generate "
@@ -1856,6 +1899,258 @@ async def get_prompt(name: str, arguments: dict | None = None) -> list[PromptMes
 
     # ── Legacy /build-project prompt removed in v0.5.0 ──
     # Use /build-new-project (greenfield) or /build-from-existing (brownfield).
+
+    elif name == "import-jira":
+        issue_key = args.get("issue_key", "").strip()
+        cloud_id = args.get("cloud_id", "").strip()
+        dng_proj = args.get("dng_project", "").strip()
+        module_name = args.get("module_name", "").strip()
+        walk_graph = args.get("walk_graph", "").strip().lower()
+
+        intro = (
+            "The user wants to import a LIVE Jira issue into DNG, with "
+            "bidirectional links: DNG requirements stamped with a "
+            "`Source: JIRA-XXX` reference + a comment posted back to the "
+            "Jira issue listing the created DNG URLs.\n\n"
+            "**This is Step 3l in BOB.md** — read that section for the full "
+            "playbook. Summary below.\n\n"
+            "**Architecture:** elm-mcp and the Atlassian MCP server are "
+            "peer MCP servers. YOU (the LLM) orchestrate by calling tools "
+            "from BOTH in sequence. Do NOT try to call Jira's REST API "
+            "directly from elm-mcp — elm-mcp has no Jira client. Do NOT "
+            "fork either MCP — the integration lives in this prompt.\n\n"
+        )
+
+        # ── Atlassian MCP availability check ──────────────────────
+        prereq_block = (
+            "## STEP 0 — verify Atlassian MCP is connected\n\n"
+            "Before doing anything else, confirm the Atlassian MCP server "
+            "is available. The signal: tools like `getJiraIssue`, "
+            "`searchJiraIssuesUsingJql`, `addCommentToJiraIssue`, and "
+            "`getAccessibleAtlassianResources` are visible to you in the "
+            "current tool list.\n\n"
+            "If those tools are NOT visible, tell the user:\n\n"
+            "> *\"To pull live from Jira I need the Atlassian MCP server "
+            "installed alongside elm-mcp. Install it from "
+            "https://github.com/atlassian/atlassian-mcp-server and "
+            "reconnect, then we'll round-trip. For now, want to paste the "
+            "ticket text instead? I'll route to `/import-requirements` "
+            "(single-artifact) or `/import-work-item` (multi-artifact).\"*\n\n"
+            "Then STOP. Don't proceed with this prompt until Atlassian MCP "
+            "is connected.\n\n"
+        )
+
+        # ── Input block ───────────────────────────────────────────
+        if issue_key:
+            # Strip URL form to a bare key if user gave a URL.
+            display_key = issue_key
+            if "/browse/" in issue_key:
+                # User pasted a URL like https://x.atlassian.net/browse/PROJ-123
+                try:
+                    display_key = issue_key.rstrip("/").split("/browse/")[-1].split("?")[0].split("#")[0]
+                except Exception:
+                    display_key = issue_key
+            input_block = (
+                f"## Target issue: `{display_key}`\n\n"
+                f"The user has identified the Jira issue: `{issue_key}`. "
+                f"Use this verbatim when calling `getJiraIssue`. Don't ask "
+                f"them to confirm the key — they already gave it.\n\n"
+            )
+        else:
+            input_block = (
+                "## Target issue: not yet provided\n\n"
+                "The user hasn't given a Jira issue key. Ask once:\n\n"
+                "> *\"Which Jira issue should I pull? Send the key "
+                "(e.g. `PROJ-123`) or the full browse URL "
+                "(e.g. `https://yourorg.atlassian.net/browse/PROJ-123`).\"*\n\n"
+                "Wait for the answer before moving on.\n\n"
+            )
+
+        # ── CloudId block ─────────────────────────────────────────
+        if cloud_id:
+            cloud_block = (
+                f"## Cloud ID: `{cloud_id}`\n\n"
+                f"User provided cloud_id. Pass this to every Atlassian MCP "
+                f"call. Don't re-discover it.\n\n"
+            )
+        else:
+            cloud_block = (
+                "## Cloud ID: not provided — discover it\n\n"
+                "Call `getAccessibleAtlassianResources()` to discover the "
+                "user's Atlassian cloud(s). If one cloud → use it silently. "
+                "If multiple → ask which one. **Do NOT ask the user for the "
+                "raw cloudId** — they don't know it; you discover it.\n\n"
+            )
+
+        # ── Walk-graph block ──────────────────────────────────────
+        if walk_graph in ("parent", "children", "both"):
+            walk_block = (
+                f"## Graph walk: `{walk_graph}` (per user instruction)\n\n"
+            )
+            if walk_graph in ("parent", "both"):
+                walk_block += (
+                    "- Pull the parent epic/initiative as context. Call "
+                    "`getJiraIssue(cloudId, <parent_key>)` once the main "
+                    "issue's parent link is known. Use the parent body for "
+                    "framing only — don't create separate reqs from it "
+                    "unless the user explicitly says to.\n"
+                )
+            if walk_graph in ("children", "both"):
+                walk_block += (
+                    "- Pull child stories. Call `searchJiraIssuesUsingJql("
+                    "cloudId, jql=\"parent = <key>\")`. Each child becomes "
+                    "a candidate requirement-set; preview all of them "
+                    "BEFORE creating anything in DNG.\n"
+                )
+            walk_block += "\n"
+        elif walk_graph == "none":
+            walk_block = (
+                "## Graph walk: NONE (per user instruction)\n\n"
+                "Use only the main issue's body. Don't pull parent or "
+                "children even if links exist.\n\n"
+            )
+        else:
+            walk_block = (
+                "## Graph walk: ASK after main pull\n\n"
+                "After `getJiraIssue` returns, inspect the result:\n"
+                "- If the issue has children (Epic with stories), ASK: "
+                "*\"This epic has N child stories. Want me to pull them "
+                "too for context, or just import from the epic body?\"*\n"
+                "- If the issue has a parent (Story under an Epic), ASK: "
+                "*\"This story rolls up to <EPIC-KEY>. Want me to pull "
+                "the parent epic for framing too?\"*\n"
+                "- Default: don't auto-walk. Walking is expensive and "
+                "expands scope.\n\n"
+            )
+
+        # ── Target block ──────────────────────────────────────────
+        target_block = "## DNG target\n\n"
+        target_block += (
+            f"DNG project: `{dng_proj}` (use this; don't ask).\n"
+            if dng_proj
+            else "DNG project: not specified. Use the currently-connected "
+                 "project; if none is connected, call `connect_to_elm` "
+                 "first, then ask which project.\n"
+        )
+        target_block += (
+            f"Module name: `{module_name}` (use this; don't ask).\n\n"
+            if module_name
+            else "Module name: suggest one based on the Jira issue's "
+                 "summary — e.g. `JIRA-1234: Tracking Service - System "
+                 "Requirements`. Make the suggestion concrete and ask the "
+                 "user to confirm or edit before pushing.\n\n"
+        )
+
+        # ── Workflow ──────────────────────────────────────────────
+        workflow = (
+            "## Workflow (12 steps — match BOB.md Step 3l)\n\n"
+            "1. **Resolve cloudId** (see Cloud ID section above).\n\n"
+            "2. **Pull the issue** — `getJiraIssue(cloudId, issueIdOrKey)`. "
+            "Save the result. Surface a compact summary to the user: key, "
+            "type, status, summary, assignee, counts (description-length, "
+            "AC-count, linked-issue-count, comment-count).\n\n"
+            "3. **Walk the graph** (see Graph Walk section above).\n\n"
+            "4. **Parse into FIVE buckets** (same as `/import-requirements` "
+            "and `/import-work-item`):\n"
+            "   - Functional reqs — atomic 'shall' statements from "
+            "Description / Functional Requirements\n"
+            "   - Non-functional reqs — performance, security, retention, "
+            "etc.\n"
+            "   - Acceptance criteria — HOLD for ETM, do NOT push to DNG\n"
+            "   - Constraints / Risks / Assumptions — ask once, default "
+            "skip\n"
+            "   - Skipped — Business Goal, In/Out of Scope, DoD, "
+            "sprint/board metadata\n\n"
+            "5. **Run the interview discipline** (v0.7.0 per-artifact "
+            "write gates). The Jira ticket gives you SEED material, not "
+            "the full set — re-elicit context. **The fact that the input "
+            "came from Jira does NOT bypass the interview gate.**\n\n"
+            "6. **Show a structured preview** — counts + every parsed "
+            "item in full + Jira source for each (so user can sanity-"
+            "check). Note what was skipped and why.\n\n"
+            "7. **Wait for explicit approval** — *\"looks good\"* / "
+            "*\"ship it\"* / *\"yes push\"*. Same write-gate as every "
+            "other path.\n\n"
+            "8. **Push to DNG via `create_requirements`** with:\n"
+            "   - `module_name=...` — auto-creates module + auto-binds "
+            "reqs\n"
+            "   - For each req, prefix the `content` body with a Source "
+            "line:\n"
+            "     ```\n"
+            "     Source: JIRA-1234 — https://yourorg.atlassian.net/browse/JIRA-1234\n"
+            "\n"
+            "     <the actual requirement text>\n"
+            "     ```\n"
+            "     If the user wants a structured attribute instead, "
+            "follow up with "
+            "`update_requirement_attributes(requirement_url, "
+            "attributes={\"dcterms:source\": jira_url})` per req — "
+            "but default to the inline Source line.\n\n"
+            "9. **Post the Jira back-link via `addCommentToJiraIssue`**:\n"
+            "   ```\n"
+            "   📋 Imported to DNG (via elm-mcp / BOB)\n"
+            "\n"
+            "   Module: [<DNG Module Title>](<module_url>)\n"
+            "\n"
+            "   Requirements:\n"
+            "   - [REQ-101: <title>](<req_url>)\n"
+            "   - [REQ-102: <title>](<req_url>)\n"
+            "   ...\n"
+            "\n"
+            "   Imported: <timestamp> UTC\n"
+            "   ```\n"
+            "   **Do this even if the user doesn't explicitly ask** — the "
+            "back-link is what makes this a round-trip rather than a "
+            "one-way drain.\n\n"
+            "10. **If a structured remote-link tool is exposed** by the "
+            "user's Atlassian MCP (names vary: "
+            "`createJiraRemoteIssueLink`, `addJiraWebLink`, etc. — "
+            "discover from the tool list at runtime), **prefer that** "
+            "over the comment. The comment is the guaranteed fallback.\n\n"
+            "11. **Surface URLs on both sides** — DNG module URL + every "
+            "requirement URL as markdown links + the Jira issue URL "
+            "(`https://<cloud>.atlassian.net/browse/<key>`). Both "
+            "audiences served.\n\n"
+            "12. **Offer next steps:**\n"
+            "    - *\"Want EWM tasks for these reqs?\"* (Step 3d) — and "
+            "if so, link each task back to Jira via "
+            "`link_workitem_to_external_url(workitem_url, "
+            "external_url=<jira_url>, label=\"Source\")` so EWM↔Jira "
+            "is also visible.\n"
+            "    - *\"Want ETM test cases from the held ACs?\"* "
+            "(Step 3e)\n"
+            "    - *\"Want a baseline snapshot?\"* (if config mgmt "
+            "is enabled)\n\n"
+        )
+
+        antipatterns = (
+            "## Anti-patterns — DO NOT\n\n"
+            "- ❌ Call Jira's REST API directly from elm-mcp. Use the "
+            "Atlassian MCP tools.\n"
+            "- ❌ Fork the Atlassian MCP. The integration lives in this "
+            "prompt, not in either MCP's code.\n"
+            "- ❌ Skip the interview because \"the ticket has a "
+            "description.\" Jira bodies are written for engineers with "
+            "shared context; DNG reqs must stand alone.\n"
+            "- ❌ Forget the Jira back-link. One-way pull ≠ round-trip.\n"
+            "- ❌ Ask the user for the cloudId. Call "
+            "`getAccessibleAtlassianResources` first.\n"
+            "- ❌ Push Jira ACs as DNG reqs. ACs go in ETM test cases.\n"
+            "- ❌ Auto-walk child stories. Ask first.\n"
+            "- ❌ Re-word the user's Jira content. Preserve phrasing; "
+            "only convert non-atomic statements to atomic shall-form.\n"
+            "- ❌ Call `create_module` then `create_requirements` "
+            "separately. Use `module_name=` inside `create_requirements` "
+            "for auto-bind.\n"
+        )
+
+        return [PromptMessage(
+            role="user",
+            content=TextContent(type="text", text=(
+                intro + prereq_block + input_block + cloud_block
+                + walk_block + target_block + workflow + antipatterns
+            )),
+        )]
 
     elif name == "build-new-project":
         idea = args.get("project_idea", "")
@@ -5792,6 +6087,7 @@ async def _dispatch_tool(name: str, arguments: Any) -> list[TextContent]:
                 "| **Build from existing material** (Jira epic PDF, pasted reqs, existing DNG module) | `/build-from-existing` (or call `build_from_existing` tool) | Imports source → converges with the standard flow at Phase 5 |",
                 "| **Import a Jira epic / work-item PDF** standalone (no code yet) | `/import-work-item` | EWM epic + DNG reqs + ETM test cases + cross-links in one round |",
                 "| **Import existing reqs** as plain text (bullets, prose, Notion paste) | `/import-requirements` | Parses to atomic shall-statements → DNG module |",
+                "| **Pull a LIVE Jira issue into DNG** with bidirectional links (requires Atlassian MCP installed alongside elm-mcp) | `/import-jira` | Round-trips: `getJiraIssue` → interview → `create_requirements` with `Source:` line → `addCommentToJiraIssue` back-link |",
                 "| **Read what's in DNG already** | `connect_to_elm` → `list_projects` → `get_modules` → `get_module_requirements` | Browse, search, export the existing project |",
                 "| **Resume a paused build** | `build_project_resume` (no args lists active runs) | Picks up at the right phase using stored state |",
                 "| **Check what the team's been doing** | `get_team_actions` | Reads BOB Team Actions module; filter by who/since/status |",
