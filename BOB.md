@@ -31,6 +31,7 @@ The MCP has 60+ tools but the user mostly invokes ~10 starting points. Find thei
 | *"build a new [thing]"* / *"start fresh"* / *"from scratch"* | `/build-new-project` | Greenfield 9-phase flow, idea → reqs → tasks → tests → code |
 | *"build from this [PDF/Jira epic/existing module]"* / pastes a chunk of work-item text | `/build-from-existing` | Brownfield — imports source, then converges with the standard flow |
 | *"import this Jira epic"* / drops a work-item PDF (and doesn't want code yet) | `/import-work-item` | Multi-artifact import only — epic + reqs + tests + cross-links. No code generation. |
+| *"import JIRA-1234"* / *"pull this Jira ticket into DNG"* / mentions a live Jira key (e.g. `PROJ-123`) and wants it fetched | **Step 3l: JIRA IMPORT** (live fetch via Atlassian MCP) | Round-trips Atlassian MCP ↔ elm-mcp: pulls the live issue, structures it into DNG with `Source:` stamp, posts a Jira comment back with DNG URLs |
 | *"import these requirements"* / pastes plain reqs text | `/import-requirements` | Single-artifact import to DNG module |
 | *"show me the reqs in [module]"* / *"what's in DNG"* | `connect_to_elm` → `list_projects` → `get_modules` → `get_module_requirements` | Pure read flow |
 | *"resume my last build"* / *"pick up where I left off"* | `build_project_resume` | Loads disk-persisted run state |
@@ -41,7 +42,7 @@ The MCP has 60+ tools but the user mostly invokes ~10 starting points. Find thei
 | *"are you connected"* / *"what version"* / *"is something broken"* | `elm_mcp_health` | One-shot diagnostic |
 | *"update yourself"* | `update_elm_mcp` | Single tool call, no per-step prompts |
 
-**The point of this table:** the user doesn't experience "60 tools" — they experience these 12 starting points. Most flows take care of the rest internally. If the intent doesn't match cleanly, invoke `/getting-started` rather than dumping a tool list.
+**The point of this table:** the user doesn't experience "60 tools" — they experience these 13 starting points. Most flows take care of the rest internally. If the intent doesn't match cleanly, invoke `/getting-started` rather than dumping a tool list.
 
 ## 🛑 NEVER ignore a module-bind warning from `create_requirements`
 
@@ -85,6 +86,7 @@ Before doing anything, check what the user actually wants. The mapping below cat
 | "do the full lifecycle" / "requirements + tasks + tests" | **Step 3f: FULL LIFECYCLE Path** | merge it with build-project (full-lifecycle stops after Phase 3; build-project continues into code) |
 | "import this PDF" / "read these requirements from a PDF" | **Step 3c: PDF IMPORT** — call `extract_pdf(file_path=...)`. **If the user attached a PDF to chat but didn't give a path:** Bob's chat UI doesn't auto-extract PDF attachments — fall back to asking them to either (a) provide the absolute path, or (b) copy-paste the PDF text and route to `/import-requirements` or `/import-work-item content=...` instead. | extract the PDF yourself; use `extract_pdf` |
 | "import these requirements" / "I have requirements already" / "we wrote them in Jira/Notion/Word" / "/import-requirements" / user pastes a chunk of text that's clearly requirements (Jira epic body, bullet list of shall-statements, etc.) | **Step 3j: IMPORT REQUIREMENTS Path** — invoke the `/import-requirements` prompt. Brownfield path: parse pasted content → preview → push to a new DNG module with auto-bind. | re-write the user's requirements in your own words — preserve their text. Don't put acceptance criteria in DNG; hold them for ETM. Don't push without preview + approval. |
+| "import JIRA-1234" / "pull JIRA-1234 into DNG" / "from this Jira ticket, make reqs" / user mentions a live Jira issue key (`PROJ-123` pattern) AND the Atlassian MCP is available (tools like `getJiraIssue`, `searchJiraIssuesUsingJql` are visible to you) | **Step 3l: JIRA IMPORT Path (live)** — round-trip via Atlassian MCP. (1) call Atlassian's `getAccessibleAtlassianResources` to get cloudId if you don't have it cached, (2) call `getJiraIssue(cloudId, key)` to pull the ticket, (3) run interview discipline on the parsed ticket body, (4) `create_requirements` with `Source: JIRA-XXX (<jira_url>)` as the first line of each requirement's content, (5) post a back-link to Jira via `addCommentToJiraIssue(cloudId, key, commentBody=<markdown listing the DNG URLs>)`. **3l is for LIVE Jira fetch — 3k is for offline PDF export of a Jira epic.** If Atlassian MCP is not connected, fall back to 3j (paste) or 3k (PDF). | call Atlassian's REST API directly from elm-mcp — use the Atlassian MCP tools instead, elm-mcp and Atlassian MCP are peer servers, YOU orchestrate. Don't skip the interview just because the ticket has a description. Don't forget the Jira back-link — round-trip is the whole point. Don't ask the user for the cloudId — call `getAccessibleAtlassianResources` first. |
 | "import this work item" / "import this Jira epic" / "we have an epic in [PDF]" / "/import-work-item" / **user shares a PDF that is clearly a work-item export (header with ID like 'OMS-XXXX', Type / Status / Reporter / Assignee fields, sections like Functional Requirements / Acceptance Criteria / Child Stories) — paste OR attached PDF OR file-path** | **Step 3k: IMPORT WORK ITEM Path** — invoke `/import-work-item` with EITHER `pdf_path` (if the user gave a file path) OR `content` (if they pasted the text). The pasted-text path is the workaround for IBM Bob, whose chat UI doesn't auto-extract PDF attachments. Multi-artifact brownfield: parse epic + reqs + ACs + child stories → push EWM work item + DNG module + ETM test cases + cross-links in one round. **Do NOT offer a 4-option fragmented menu** (import-OR-summarize-OR-tasks-OR-structure). `/import-work-item` covers all of those simultaneously — offer only TWO choices: full import (default) or read-only summary. | require a PDF path. Pasted text works just as well — never block the user when they've already given you the content. Don't guess work item types — call `get_ewm_workitem_types`. Don't try to match Jira assignees to EWM users — leave unset. **Don't fragment the flow** — see "Anti-pattern: don't fragment a unified flow" section below. |
 | "show me the requirements in [module]" / "list reqs" / "read [module]" | **Step 3a: READ Path** | dump every req without filter — interview about filtering first |
 | "update yourself" / "are you up to date" / "pull the latest" / "update the MCP" / "update this server" / "update the elm mcp" | call `update_elm_mcp` ONCE — that's the entire update. **DO NOT run individual `git fetch` / `git pull` / `pip install` / `restart` commands via Bash** — `update_elm_mcp` does all of that internally in a single tool call so the user is prompted at most once (and zero times if `update_elm_mcp` is in their `alwaysAllow`). | run a series of bash commands. The user explicitly said this is friction — eight per-step approvals when one tool call is enough. The tool handles fetch + pull + version comparison + restart-instructions internally. Just call it. |
@@ -1156,6 +1158,85 @@ This is the multi-artifact extension of Step 3j — instead of one DNG module, y
 - ❌ Creating a separate `create_module` then `create_requirements` — use `module_name` in `create_requirements` for auto-bind
 - ❌ Forgetting the cross-links — `create_task` / `create_test_case` should pass `requirement_url` so the link is written atomically (and the back-link is automatic per v0.1.12)
 - ❌ Not surfacing default-choices in the post-push report — the user needs to see what was decided for them
+
+### Step 3l: JIRA IMPORT Path (live — via Atlassian MCP round-trip)
+
+Triggered when the user references a **live** Jira issue (key like `PROJ-123` or a `https://*.atlassian.net/browse/PROJ-123` URL) and wants it pulled into DNG. **This is different from 3j/3k:** 3j is for pasted text, 3k is for offline PDF exports, **3l is for live Jira fetch + write-back via the Atlassian MCP server.**
+
+#### Prerequisite — Atlassian MCP must be available
+
+Before doing anything, check whether the Atlassian MCP server is connected. The signal is that tools like `getJiraIssue`, `searchJiraIssuesUsingJql`, `addCommentToJiraIssue`, `getAccessibleAtlassianResources` are visible to you. If they are NOT visible:
+
+> *"To pull live from Jira I need the Atlassian MCP server installed alongside elm-mcp. It's the official server from Atlassian — install it from https://github.com/atlassian/atlassian-mcp-server and reconnect, then we'll round-trip. For now, want to paste the ticket text instead? I'll route to `/import-requirements` (Step 3j) or `/import-work-item` (Step 3k) depending on shape."*
+
+Do NOT try to call Jira's REST API directly from elm-mcp — elm-mcp and Atlassian MCP are peer MCP servers. You (the LLM) orchestrate by calling tools from BOTH servers in sequence. Forking or rebuilding Atlassian's MCP is also the wrong answer; the integration lives in this prompt path.
+
+#### What you do
+
+1. **Resolve cloudId** — if you don't have one cached from earlier this session, call Atlassian's `getAccessibleAtlassianResources()` and pick the cloud the user identified (or ask if there's more than one).
+
+2. **Pull the issue** — call `getJiraIssue(cloudId=..., issueIdOrKey=...)`. Save the result. Surface to the user a compact summary: key, type, status, summary, assignee, and counts (description-length, AC-count, linked-issue-count, comment-count).
+
+3. **Optionally walk the graph.** If the ticket is an Epic, ask whether the user wants child stories pulled too via `searchJiraIssuesUsingJql(cloudId, jql="parent = JIRA-1234")`. If it's a Story, ask whether to pull the parent Epic for context. **Don't auto-pull** — ask. Walking the graph is expensive and unconfirmed scope creep.
+
+4. **Parse the Jira content into the same FIVE buckets as Step 3j:**
+   - **Functional reqs** — atomic 'shall' statements from the Description / Functional Requirements section
+   - **Non-functional reqs** — performance, security, retention, etc.
+   - **Acceptance criteria** — HOLD for ETM later; do NOT push to DNG
+   - **Constraints / Risks / Assumptions** — ask once if user wants them; default skip
+   - **Skipped** — Business Goal, In/Out of Scope, DoD, sprint/board metadata
+
+5. **Run the interview discipline (v0.7.0 per-artifact write gates).** A Jira ticket gives you the SEED material, not the full set — the original ticket author wrote for engineers who already had context; you have to re-elicit that context for DNG. Ask many questions before generating. The fact that the input came from Jira does NOT bypass the interview gate.
+
+6. **Show structured preview** — counts + every parsed item in full, plus the Jira source for each (so the user can sanity-check what came from where). Note what was skipped and why.
+
+7. **Wait for explicit approval.** Same write-gate as 3j/3k.
+
+8. **On approval, push to DNG via `create_requirements`** with:
+   - `module_name=...` — auto-creates module + auto-binds reqs
+   - For each requirement, prefix the `content` body with a `Source:` line:
+     ```
+     Source: JIRA-1234 — https://yourorg.atlassian.net/browse/JIRA-1234
+
+     <the actual requirement text>
+     ```
+     This is the lightweight back-reference. Survives baselines and is human-readable in DNG's primary text. If the user wants a structured attribute instead (queryable via OSLC), follow up after creation with `update_requirement_attributes(requirement_url, attributes={"dcterms:source": jira_url})` per req — but default to the inline Source line; only escalate to the attribute stamp if asked.
+
+9. **Post the Jira back-link via `addCommentToJiraIssue`.** Body should be a clear markdown chunk:
+   ```
+   📋 Imported to DNG (via elm-mcp / BOB)
+
+   Module: [DNG Module Title](<module_url>)
+
+   Requirements:
+   - [REQ-101: <title>](<req_url>)
+   - [REQ-102: <title>](<req_url>)
+   ...
+
+   Imported: <timestamp> UTC
+   ```
+   This is the DNG → Jira direction of the round-trip. The comment renders in Jira's activity feed and is visible to everyone watching the issue. **Do this even if the user doesn't ask** — the back-link is what makes this a round-trip rather than a one-way drain.
+
+10. **If a structured remote-link tool is exposed by the user's Atlassian MCP** (names vary: `createJiraRemoteIssueLink`, `addJiraWebLink`, `createIssueLink` to an external URL, etc. — discover from the tool list at runtime), **prefer that over the comment** for the structured back-link. The comment is the guaranteed fallback because every Atlassian MCP install exposes `addCommentToJiraIssue`; the remote-link tool may or may not be present.
+
+11. **Surface URLs on both sides** — DNG module URL + every requirement URL as markdown links, AND the Jira issue URL (so the user can click in and verify the comment landed). Both audiences served: DNG-savvy users go to DNG, Jira-savvy users go to Jira, the round-trip is visible from either side.
+
+12. **Offer next steps:**
+    - *"Want me to create EWM tasks for these requirements?"* (Step 3d) — and if so, link each task back to the same Jira ticket via `link_workitem_to_external_url(workitem_url, external_url=<jira_url>, label="Source")` so EWM↔Jira is also visible.
+    - *"Want me to create ETM test cases from the Jira ACs I held back?"* (Step 3e)
+    - *"Want a baseline snapshot of the module?"* (if config mgmt is enabled)
+
+#### Anti-patterns to avoid
+
+- ❌ **Calling Jira's REST API directly from elm-mcp.** elm-mcp does not have a Jira client — use the Atlassian MCP tools. They are peer MCP servers; you orchestrate.
+- ❌ **Forking the Atlassian MCP server to "make it work with ELM."** The integration lives in this BOB path, not in either MCP's code.
+- ❌ **Skipping the interview because "the ticket has a description."** Jira descriptions are written for engineers with shared context. DNG requirements need to stand alone. Re-elicit. (See "Generation Discipline" section.)
+- ❌ **Forgetting the Jira back-link.** A one-way pull is not a round-trip. The user expected bidirectional links — comment or remote-link, your choice based on available tools, but ALWAYS write something back to Jira.
+- ❌ **Asking the user for the cloudId.** Call `getAccessibleAtlassianResources` first; only ask if there's ambiguity (multiple clouds).
+- ❌ **Pushing the Jira issue's acceptance criteria into DNG as requirements.** ACs go in ETM test cases. Hold them per the 3j/3k pattern.
+- ❌ **Pulling child stories automatically when the ticket is an Epic.** Ask. Scope must be explicit.
+- ❌ **Re-wording the user's Jira content.** Preserve the original phrasing. Only convert to atomic shall-form when the input is non-atomic.
+- ❌ **Calling `create_module` separately then `create_requirements`.** Use `module_name=...` inside `create_requirements` so the module is auto-created + auto-bound in one call.
 
 ### After Any Path
 Ask: "Want to do anything else? I can read from another module, generate more requirements (single-tier or tiered), create tasks or test cases, or switch projects."
