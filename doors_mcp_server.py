@@ -79,7 +79,7 @@ load_dotenv()
 # decide if a newer GitHub release exists; the `connect_to_elm`
 # response also surfaces it so users always know what version they're
 # running.
-__version__ = "0.10.1"
+__version__ = "0.11.0"
 GITHUB_REPO = "brettscharm/elm-mcp"
 
 app = Server("elm-mcp")
@@ -1121,6 +1121,75 @@ async def list_prompts() -> list[Prompt]:
                     description="Module title, ID, or URL. Optional — AI lists modules and asks if not given.",
                     required=False,
                 ),
+            ],
+        ),
+        Prompt(
+            name="trace-gaps",
+            description=(
+                "Cross-domain traceability gap finder. Walks DNG -> "
+                "EWM -> ETM and reports: requirements without an "
+                "implementing task, requirements without a "
+                "validating test case, orphan tasks, orphan test "
+                "cases. Read-only. Ends with a pointer to "
+                "Requirements Quality Assistant in IBM ELM AI Hub "
+                "for semantic gap analysis."
+            ),
+            arguments=[
+                PromptArgument(name="project", description="DNG project. Optional.", required=False),
+                PromptArgument(name="module", description="DNG module. Optional.", required=False),
+                PromptArgument(name="ewm_project", description="EWM project for task scan. Optional.", required=False),
+                PromptArgument(name="etm_project", description="ETM project for test scan. Optional.", required=False),
+            ],
+        ),
+        Prompt(
+            name="init-do-178c",
+            description=(
+                "Walk through DO-178C (aerospace / defense software) "
+                "project initialization in ELM: artifact types "
+                "(System Reqs -> HLR -> LLR + Software Verification), "
+                "attribute schema (DAL A-E, Verification Method "
+                "I/A/R/T), link types, lifecycle states. Most schema "
+                "work is manual in DNG admin; this prompt surfaces "
+                "the exact values + creates the modules where the "
+                "API allows."
+            ),
+            arguments=[
+                PromptArgument(name="dng_project", description="DNG project name. Optional.", required=False),
+                PromptArgument(name="dal", description="Design Assurance Level: A/B/C/D/E. Optional.", required=False),
+                PromptArgument(name="system_name", description="Short system name. Optional.", required=False),
+            ],
+        ),
+        Prompt(
+            name="init-iso-26262",
+            description=(
+                "Walk through ISO 26262 (automotive functional "
+                "safety) project initialization: artifact types "
+                "(Hazards -> Safety Goals -> FSR -> TSR -> SwSR / "
+                "HwSR), ASIL-graded attributes, hazard analysis "
+                "context, lifecycle, DIA constraints. Includes "
+                "explicit prompt for HARA prerequisite."
+            ),
+            arguments=[
+                PromptArgument(name="dng_project", description="DNG project. Optional.", required=False),
+                PromptArgument(name="asil", description="ASIL level: A/B/C/D. Optional.", required=False),
+                PromptArgument(name="system_name", description="Short system name. Optional.", required=False),
+            ],
+        ),
+        Prompt(
+            name="project-scaffold",
+            description=(
+                "Pre-flight interview before the first requirement "
+                "gets written. Captures organizational context, "
+                "regulatory context, ELM project structure decisions, "
+                "and cross-tool linking strategy across four layers. "
+                "Saves answers as a Project Charter artifact in DNG. "
+                "Run this before /build-new-project for any real "
+                "enterprise project."
+            ),
+            arguments=[
+                PromptArgument(name="dng_project", description="DNG project. Optional.", required=False),
+                PromptArgument(name="methodology", description="Agile/SAFe/V-Model/DO-178C/ISO 26262/IEC 62304/Custom. Optional.", required=False),
+                PromptArgument(name="domain", description="Brief domain (e.g. 'fleet tracking'). Optional.", required=False),
             ],
         ),
         Prompt(
@@ -2180,6 +2249,463 @@ async def get_prompt(name: str, arguments: dict | None = None) -> list[PromptMes
             role="user",
             content=TextContent(type="text",
                                  text=intro + target + steps + antipatterns),
+        )]
+
+    elif name == "trace-gaps":
+        proj = args.get("project", "").strip()
+        mod = args.get("module", "").strip()
+        ewm = args.get("ewm_project", "").strip()
+        etm = args.get("etm_project", "").strip()
+        parts = []
+        parts.append(
+            "The user wants a cross-domain TRACEABILITY GAP report. "
+            "Walk DNG -> EWM -> ETM and surface orphans on both sides. "
+            "Director-level read: 'where are we missing implementing "
+            "tasks / validating tests?' Use existing tools.\n\n"
+        )
+        parts.append("## Target\n\n")
+        if proj and mod:
+            parts.append(f"DNG project: `{proj}`. Module: `{mod}`.\n")
+        else:
+            parts.append("DNG project/module not fully specified — ask "
+                         "the user; offer `connect_to_elm` then "
+                         "`list_projects` if needed.\n")
+        if ewm:
+            parts.append(f"EWM project: `{ewm}`.\n")
+        else:
+            parts.append("EWM project not specified — ask which one to "
+                         "scan for tasks. If user says 'skip', skip "
+                         "task-side checks.\n")
+        if etm:
+            parts.append(f"ETM project: `{etm}`.\n\n")
+        else:
+            parts.append("ETM project not specified — ask which one to "
+                         "scan for tests. If user says 'skip', skip "
+                         "test-side checks.\n\n")
+        parts.append(
+            "## Workflow\n\n"
+            "1. **Pull module reqs** — call `get_module_requirements` "
+            "with the project + module identifiers. Save the (key, "
+            "title, url) tuples.\n\n"
+            "2. **For each req, check EWM for implementing tasks** — "
+            "call `query_work_items` against the EWM project, filtering "
+            "where `calm:implementsRequirement` equals the req's URL. "
+            "If results are empty, the req has NO implementing task. "
+            "Flag it.\n\n"
+            "3. **For each req, check ETM for validating test cases** "
+            "— call `list_test_cases` for the ETM project, then check "
+            "each test case for a link to the req's URL. ETM reverse-"
+            "link queries are fuzzy in OSLC; if you can't determine "
+            "cleanly, say so honestly and surface 'unknown' for that "
+            "side rather than guessing.\n\n"
+            "4. **Surface counts in a markdown table:**\n"
+            "   - Total reqs in module: N\n"
+            "   - Reqs WITH implementing task: X (X/N = %)\n"
+            "   - Reqs WITHOUT implementing task: N - X\n"
+            "   - Reqs WITH validating test case: Y (Y/N = %)\n"
+            "   - Reqs WITHOUT validating test case: N - Y\n\n"
+            "5. **Top offenders (10 each)** — list the 10 worst as "
+            "markdown links: `[REQ-007: <title>](<url>) — no task / "
+            "no test`.\n\n"
+            "6. **Orphan tasks/tests (if user asked)** — query EWM "
+            "for tasks where `implementsRequirement` is empty; same "
+            "for ETM tests with no req link. List as markdown.\n\n"
+            "7. **End with the standard pointer:**\n\n"
+            "   > *\"Pattern-based gap detection above catches "
+            "structural gaps (missing links). For SEMANTIC trace "
+            "gaps — does the task actually do what the requirement "
+            "needs? Does the test actually validate intent? — open "
+            "these artifacts in the **Requirements Quality "
+            "Assistant** agent in IBM ELM AI Hub. Pattern matching "
+            "is the floor; AI is the ceiling.\"*\n\n"
+            "8. **Action list** — for each gap, suggest the "
+            "concrete next step: `/create-tasks` for a missing "
+            "task, `/create-test-cases` for a missing test.\n\n"
+            "## Anti-patterns\n\n"
+            "- ❌ Don't claim 100% accuracy on the orphan-test "
+            "side — ETM reverse-link queries are fuzzy. Be honest "
+            "about methodology limitations.\n"
+            "- ❌ Don't auto-create tasks/tests to 'fix' the gaps. "
+            "Read-only report.\n"
+            "- ❌ Don't paraphrase the URL list — engineers need "
+            "clickable links.\n"
+        )
+        return [PromptMessage(
+            role="user",
+            content=TextContent(type="text", text="".join(parts)),
+        )]
+
+    elif name == "init-do-178c":
+        proj = args.get("dng_project", "").strip()
+        dal = args.get("dal", "").strip().upper()
+        sys_name = args.get("system_name", "").strip() or "<System>"
+        parts = []
+        parts.append(
+            "The user wants to initialize a DO-178C compliant ELM "
+            "project. DO-178C is THE software certification standard "
+            "for airborne systems (FAA, EASA). This prompt walks "
+            "through artifact-type / attribute / link-type / "
+            "lifecycle decisions and creates what's creatable via "
+            "API. **Most schema work happens in DNG admin (Project "
+            "→ Manage Project Properties → Types) — those are "
+            "MANUAL steps; surface them with the exact values.**\n\n"
+            "**Sales position at the end:** the scaffold is the "
+            "starting structure; IBM ELM AI Hub keeps the "
+            "certification evidence alive.\n\n"
+        )
+        if dal in ("A", "B", "C", "D", "E"):
+            parts.append(f"## DAL: **{dal}**\n\n")
+        else:
+            parts.append(
+                "## DAL not specified — ASK first\n\n"
+                "DO-178C Design Assurance Levels (most → least "
+                "rigorous):\n\n"
+                "- **A** — catastrophic failure prevention. MC/DC "
+                "structural coverage. Independence required.\n"
+                "- **B** — hazardous. Decision coverage. "
+                "Independence required.\n"
+                "- **C** — major. Statement coverage. Trace to "
+                "code.\n"
+                "- **D** — minor. LLR not strictly required.\n"
+                "- **E** — no safety effect. DO-178C objectives "
+                "do not apply.\n\n"
+                "DAL drives EVERY downstream choice. Don't proceed "
+                "until the user answers.\n\n"
+            )
+        parts.append(
+            "## DO-178C ELM Scaffold\n\n"
+            "### 1. Artifact Types (DNG admin)\n\n"
+            "Have the user create in DNG admin → Manage Project "
+            "Properties → Types:\n\n"
+            "- **System Requirement** — what the system shall do "
+            "at system level (PSAC scope).\n"
+            "- **High-Level Requirement (HLR)** — software-level "
+            "behavior derived from System Reqs.\n"
+            "- **Low-Level Requirement (LLR)** — design-level reqs, "
+            "~one per software function.\n"
+            "- **Software Verification Requirement** — what to "
+            "test + how (Inspection / Analysis / Review / Test per "
+            "DO-178C §6.3).\n"
+            "- **Software Design Description** — design artifact.\n\n"
+            "### 2. Attribute Schema (DNG admin)\n\n"
+            "Attach to System Req / HLR / LLR types:\n\n"
+            "- **DAL** (enum A-E) — per-req DAL.\n"
+            "- **Verification Method** (enum: Inspection / "
+            "Analysis / Review / Test) — IART per §6.3.\n"
+            "- **Verification Evidence Location** (string) — link "
+            "to test report / analysis doc / review record.\n"
+            "- **Source Document** (string) — PSAC §, SDP §, "
+            "customer contract §.\n"
+            "- **Derived** (boolean) — flag derived requirements; "
+            "require explicit justification per §5.1.2.\n\n"
+            "### 3. Link Types (DNG admin)\n\n"
+            "- `oslc_rm:elaboratedBy` — System Req → HLR → LLR\n"
+            "- `oslc_rm:validatedBy` — Any req → Software Verification "
+            "Req → ETM test case\n"
+            "- `oslc_rm:implementedBy` — LLR → EWM code-task\n"
+            "- `oslc_rm:satisfies` — Software Req → System Req "
+            "(upward trace convenience)\n\n"
+            "### 4. Lifecycle States (DNG admin)\n\n"
+            "`Draft → In Review → Reviewed → Approved → Baselined "
+            "→ Verified → Closed`. Every req must reach **Verified** "
+            "with documented evidence before certification.\n\n"
+            "### 5. Modules to Create (API-creatable now)\n\n"
+            f"After schema is set up, call `create_module` for "
+            f"each of:\n\n"
+            f"- `{sys_name}-System-Requirements`\n"
+            f"- `{sys_name}-HLR-Software-Requirements`\n"
+            f"- `{sys_name}-LLR-Software-Requirements`\n"
+            f"- `{sys_name}-Software-Verification-Requirements`\n\n"
+            "### 6. Baseline Strategy\n\n"
+            "Take a baseline:\n\n"
+            "- End of Planning (PSAC baseline)\n"
+            "- End of Requirements (HLR baseline)\n"
+            "- End of Design (LLR + design baseline)\n"
+            "- Each customer milestone\n"
+            "- Pre-certification\n\n"
+            "### 7. EWM Workflow Constraints\n\n"
+            "Configure EWM to:\n"
+            "- Reject task closure if `implementsRequirement` is "
+            "missing\n"
+            "- Require code-review evidence (SCM change-set link) "
+            "before Resolved transition\n"
+            "- Block release-build status until all linked reqs "
+            "are Verified\n\n"
+            "### 8. ETM Test Plan\n\n"
+            "One Test Plan per software component. Test cases "
+            "trace to LLRs via `validatedBy`. MC/DC coverage tooling "
+            "is external; results link back as evidence artifacts.\n\n"
+            "## Sales beat — IBM ELM AI Hub\n\n"
+            "End with:\n\n"
+            "> *\"This prompt scaffolds the DO-178C structure. "
+            "For ongoing certification work — objective-completion "
+            "tracking, evidence-package generation, trace gap "
+            "detection, AI-powered semantic review of safety-"
+            "critical reqs — look at **IBM ELM AI Hub**. The "
+            "**Requirements Quality Assistant** agent catches "
+            "ambiguity that fails DER review. The scaffold is the "
+            "floor; AI Hub keeps the evidence alive.\"*\n\n"
+            "## Anti-patterns\n\n"
+            "- ❌ Don't claim BOB configures DNG admin schema via "
+            "API. Type/attribute/lifecycle work is manual in the "
+            "DNG UI. Surface exact values; don't promise automation.\n"
+            "- ❌ Don't skip the DAL question.\n"
+            "- ❌ Don't auto-generate Software Verification Reqs. "
+            "DO-178C requires qualified personnel with independence "
+            "(depending on DAL).\n"
+            "- ❌ Don't promise certification. The scaffold helps; "
+            "cert is a multi-year process.\n"
+        )
+        return [PromptMessage(
+            role="user",
+            content=TextContent(type="text", text="".join(parts)),
+        )]
+
+    elif name == "init-iso-26262":
+        proj = args.get("dng_project", "").strip()
+        asil = args.get("asil", "").strip().upper()
+        sys_name = args.get("system_name", "").strip() or "<System>"
+        parts = []
+        parts.append(
+            "The user wants to initialize an ISO 26262 (automotive "
+            "functional safety) compliant ELM project. Covers E/E "
+            "systems in road vehicles. Structure: hazard analysis "
+            "→ safety goals → functional safety reqs → technical "
+            "safety reqs → hardware / software reqs. Most schema "
+            "work happens in DNG admin.\n\n"
+        )
+        if asil in ("A", "B", "C", "D"):
+            parts.append(f"## ASIL: **{asil}**\n\n")
+        else:
+            parts.append(
+                "## ASIL not specified — ASK first\n\n"
+                "- **D** — highest risk; electronic power steering, "
+                "ADAS. Maximum rigor.\n"
+                "- **C** — engine / transmission control.\n"
+                "- **B** — body electronics with safety relevance.\n"
+                "- **A** — lower-criticality functions.\n\n"
+                "ASIL drives downstream rigor: independence of "
+                "review (DIA for ASIL ≥ B), coverage targets, "
+                "decomposition rules (ISO 26262-9). Don't proceed "
+                "until ASIL is known.\n\n"
+            )
+        parts.append(
+            "## ISO 26262 ELM Scaffold\n\n"
+            "### 1. Artifact Types (DNG admin)\n\n"
+            "- **Hazard** — identified hazard with severity / "
+            "exposure / controllability (S/E/C) → ASIL\n"
+            "- **Safety Goal** — top-level safety req from hazard "
+            "analysis\n"
+            "- **Functional Safety Requirement (FSR)** — system-"
+            "level behavior to achieve safety goals\n"
+            "- **Technical Safety Requirement (TSR)** — hardware / "
+            "software allocation\n"
+            "- **Software Safety Requirement (SwSR)**\n"
+            "- **Hardware Safety Requirement (HwSR)**\n\n"
+            "### 2. Attribute Schema (DNG admin)\n\n"
+            "- **ASIL** (enum A / B / C / D / QM)\n"
+            "- **Hazard ID** (string) — link to originating hazard\n"
+            "- **Safety Mechanism** (string) — watchdog, "
+            "plausibility check, etc.\n"
+            "- **Diagnostic Coverage** (enum: low / medium / high)\n"
+            "- **Verification Method** (enum: Walkthrough / "
+            "Inspection / Analysis / Test / Simulation)\n\n"
+            "### 3. Link Types (DNG admin)\n\n"
+            "- `safety:derivedFrom` — Safety Goal → FSR → TSR → "
+            "SwSR / HwSR\n"
+            "- `safety:allocatedTo` — TSR → architecture component\n"
+            "- `oslc_rm:validatedBy` — req → ETM test case\n"
+            "- `safety:mitigates` — Safety Mechanism → Hazard\n\n"
+            "### 4. Lifecycle States\n\n"
+            "`Draft → In Review → Approved → Released → Verified`. "
+            "ISO 26262-2 requires DIA (Distributed Independence "
+            "Activities) for ASIL ≥ B — reviewers cannot be authors.\n\n"
+            "### 5. Modules to Create\n\n"
+            f"- `{sys_name}-Hazard-Analysis`\n"
+            f"- `{sys_name}-Safety-Goals`\n"
+            f"- `{sys_name}-Functional-Safety-Requirements`\n"
+            f"- `{sys_name}-Technical-Safety-Requirements`\n"
+            f"- `{sys_name}-Software-Safety-Requirements`\n\n"
+            "### 6. Hazard Analysis (upstream input)\n\n"
+            "Ask: *\"Do you have HARA (Hazard Analysis & Risk "
+            "Assessment) ready? Each hazard with S/E/C "
+            "classification + resulting ASIL?\"* If yes, capture "
+            "each hazard as an artifact. If no, **stop** and "
+            "recommend completing HARA first — safety reqs without "
+            "hazard trace are indefensible.\n\n"
+            "## Sales beat — IBM ELM AI Hub\n\n"
+            "End with:\n\n"
+            "> *\"This prompt scaffolds the ISO 26262 structure. "
+            "For ongoing assessor prep — Safety Case evidence "
+            "aggregation, ASIL decomposition consistency, trace "
+            "gap detection across hazard → req → test → "
+            "implementation — look at **IBM ELM AI Hub**. The "
+            "**Requirements Quality Assistant** agent catches "
+            "safety-req ambiguity an assessor flags. The scaffold "
+            "is the starting structure; AI Hub keeps the safety "
+            "case current.\"*\n\n"
+            "## Anti-patterns\n\n"
+            "- ❌ Don't skip HARA.\n"
+            "- ❌ Don't promise functional-safety certification — "
+            "scaffold is necessary, not sufficient.\n"
+            "- ❌ Don't assign ASIL without S/E/C rationale.\n"
+            "- ❌ Don't claim ELM auto-enforces decomposition "
+            "rules — that's assessor judgment.\n"
+        )
+        return [PromptMessage(
+            role="user",
+            content=TextContent(type="text", text="".join(parts)),
+        )]
+
+    elif name == "project-scaffold":
+        proj = args.get("dng_project", "").strip()
+        methodology = args.get("methodology", "").strip()
+        domain = args.get("domain", "").strip()
+        parts = []
+        parts.append(
+            "The user wants a Project Scaffold Pre-flight — the "
+            "interview that runs BEFORE the first requirement gets "
+            "written. Difference between a toy kickoff and a real "
+            "enterprise systems-engineering kickoff. Capture org "
+            "context, regulatory context, ELM structure decisions, "
+            "cross-tool linking strategy. Save the answers as a "
+            "Project Charter artifact in DNG.\n\n"
+            "**This prompt is the prerequisite for "
+            "/build-new-project on any real project.** Run "
+            "standalone OR have /build-new-project chain into it.\n\n"
+        )
+        if methodology:
+            parts.append(f"## Methodology: **{methodology}**\n\n"
+                         "Skipping the methodology question; jump "
+                         "to Layer 1.\n\n")
+        if domain:
+            parts.append(f"## Domain: **{domain}**\n\n"
+                         "Use as context throughout the interview.\n\n")
+        parts.append(
+            "## Layer 1 — Organizational Context\n\n"
+            "Ask ONE QUESTION AT A TIME (don't dump):\n\n"
+            "1. *\"Which business unit / program is this under?\"*\n"
+            "2. *\"Project sponsor? (Person + title)\"*\n"
+            "3. *\"Product owner / requirements owner?\"*\n"
+            "4. *\"Lead architect / technical lead?\"*\n"
+            "5. *\"QA / test lead?\"*\n"
+            "6. *\"Compliance / safety / security officer "
+            "involved?\"*\n"
+            "7. *\"Target customer — internal? External? Both?\"*\n"
+            "8. *\"Delivery milestone — what date / which "
+            "release?\"*\n"
+            "9. *\"What's the existing world we're improving on?\"*\n\n"
+            "Capture each answer verbatim.\n\n"
+            "## Layer 2 — Regulatory + Quality Context\n\n"
+            "1. *\"Which compliance regime applies?\"* Options: "
+            "HIPAA / PCI-DSS / SOC 2 / FedRAMP / DO-178C (DAL?) / "
+            "ISO 26262 (ASIL?) / IEC 62304 (Class A/B/C?) / ITAR "
+            "/ GDPR / None.\n"
+            "2. *\"Evidence package required at delivery?\"*\n"
+            "3. *\"Signing authority?\"*\n"
+            "4. *\"Quality target — avg lint score?\"* BOB "
+            "recommends 85+; safety-critical 90+.\n"
+            "5. *\"Test coverage target?\"* (% reqs validated)\n"
+            "6. *\"Approval target before downstream work?\"* (% "
+            "reqs that must reach Approved)\n\n"
+            "**If a regulated regime is named, point the user at "
+            "/init-do-178c, /init-iso-26262, /init-iec-62304 to "
+            "scaffold the right artifact types / attributes / "
+            "links / lifecycle.**\n\n"
+            "## Layer 3 — ELM Project Structure Decisions\n\n"
+            "1. *\"DNG folder hierarchy and naming convention?\"* "
+            "Default: `/Requirements/<Tier>/<Module>`.\n"
+            "2. *\"Standard artifact types or custom?\"*\n"
+            "3. *\"Required attributes per req?\"* Always: Title, "
+            "Description, Status, Owner. Often: Priority, "
+            "Verification Method, Source Document. Compliance: "
+            "DAL / ASIL / Software Safety Class.\n"
+            "4. *\"Link types?\"* Defaults: `elaboratedBy`, "
+            "`validatedBy`, `implementedBy`. Compliance adds: "
+            "`derivedFrom`, `mitigates`, `satisfies`.\n"
+            "5. *\"Lifecycle states?\"* Defaults: `Draft → "
+            "Reviewed → Approved → Baselined → Verified → "
+            "Closed`. Agile lighter: `Draft → Ready → Done`.\n"
+            "6. *\"Baseline cadence?\"* (per milestone / per "
+            "release / weekly / never)\n"
+            "7. *\"DNG CM enabled?\"* — call `elm_mcp_health` "
+            "to check. If not, warn module binding + baselines + "
+            "streams won't work programmatically.\n"
+            "8. *\"Stream strategy?\"* (single mainline vs. "
+            "parallel feature streams)\n\n"
+            "## Layer 4 — Cross-Tool Linking Strategy\n\n"
+            "1. *\"Jira / EWM for issue tracking?\"* If Jira, "
+            "confirm JIRA_* env vars. Plan: each issue → DNG req "
+            "via /import-jira; back-link via add_jira_comment.\n"
+            "2. *\"GitHub / GitLab / IBM RTC for code?\"* Plan: "
+            "PR/commit → EWM task via SCM link.\n"
+            "3. *\"Test management — ETM or external (Xray, "
+            "TestRail, jUnit)?\"* If ETM, plan: verification req → "
+            "ETM test case → execution result.\n"
+            "4. *\"Comms channel?\"* Teams / Slack URL — captured "
+            "for future notifications.\n"
+            "5. *\"Document storage for evidence?\"* DNG "
+            "attachments / SharePoint / S3 — affects Verification "
+            "Evidence Location.\n\n"
+            "## Capture as a Project Charter artifact\n\n"
+            "After all four layers, summarize the answers in a "
+            "structured Markdown block:\n\n"
+            "```markdown\n"
+            "# Project Charter — <name>\n"
+            "\n"
+            "## Organization\n"
+            "- BU / Program: ...\n"
+            "- Sponsor: ...\n"
+            "- Owners: ...\n"
+            "\n"
+            "## Regulatory\n"
+            "- Regime: ...\n"
+            "- Evidence: ...\n"
+            "- Quality target: ...\n"
+            "\n"
+            "## ELM Structure\n"
+            "- Folders: ...\n"
+            "- Artifact types: ...\n"
+            "- Link types: ...\n"
+            "- Lifecycle: ...\n"
+            "- Baseline cadence: ...\n"
+            "\n"
+            "## Cross-Tool Strategy\n"
+            "- Jira: ...\n"
+            "- SCM: ...\n"
+            "- ETM: ...\n"
+            "- Comms: ...\n"
+            "```\n\n"
+            "Wait for user approval of the charter. On approval, "
+            "call `create_requirements` with the charter as the "
+            "body, in a module named `<system>-Project-Charter`. "
+            "Use artifact type `Information` or `Project Plan` "
+            "(whatever the project's types allow). **The charter "
+            "is the source of truth for context that all "
+            "subsequent flows reference.**\n\n"
+            "## After scaffold — offer next steps\n\n"
+            "- *\"Write the first requirements now? I'll run "
+            "/build-new-project with the charter as context.\"*\n"
+            "- *\"Compliance regime is [DO-178C / ISO 26262 / IEC "
+            "62304] — run /init-[regime] to scaffold artifact "
+            "types / attributes / links / lifecycle?\"*\n"
+            "- *\"Want to import existing reqs from a Jira epic "
+            "or PDF? /import-jira or /import-work-item.\"*\n\n"
+            "## Anti-patterns\n\n"
+            "- ❌ Don't ask all 30 questions at once. ONE at a "
+            "time. Conversational.\n"
+            "- ❌ Don't skip layers. Each depends on the previous.\n"
+            "- ❌ Don't push the charter before user approval.\n"
+            "- ❌ Don't claim the charter is comprehensive — "
+            "it's a starting point; projects evolve.\n"
+            "- ❌ Don't run the full flow when the user just "
+            "wants a quick MVP. If layers 1-2 answer 'small "
+            "internal MVP, no compliance', skip ahead to "
+            "/build-new-project.\n"
+        )
+        return [PromptMessage(
+            role="user",
+            content=TextContent(type="text", text="".join(parts)),
         )]
 
     elif name == "build-new-project":

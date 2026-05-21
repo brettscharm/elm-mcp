@@ -33,6 +33,8 @@ The MCP has 60+ tools but the user mostly invokes ~10 starting points. Find thei
 | *"import this Jira epic"* / drops a work-item PDF (and doesn't want code yet) | `/import-work-item` | Multi-artifact import only — epic + reqs + tests + cross-links. No code generation. |
 | *"import JIRA-1234"* / *"pull this Jira ticket into DNG"* / *"/import-jira"* / mentions a live Jira key (e.g. `PROJ-123`) and wants it fetched | **`/import-jira` prompt → Step 3l: JIRA IMPORT** (native elm-mcp Jira tools) | Round-trips Jira ↔ DNG using elm-mcp's own `get_jira_issue` / `add_jira_comment` (direct REST, API-token auth). No Atlassian MCP / OAuth required. Needs JIRA_BASE_URL / JIRA_EMAIL / JIRA_API_TOKEN in .env. |
 | *"audit my requirements"* / *"score the [module]"* / *"/audit-requirements"* / *"how is this module looking?"* | **`/audit-requirements` prompt** → calls `audit_module` | Pattern-based INCOSE GtWR + IEEE 29148 lint of every req in a DNG module + status/owner audit. Ends with a pointer to the **Requirements Quality Assistant** agent in **IBM ELM AI Hub** for AI semantic scoring. Read-only. |
+| *"find trace gaps"* / *"what's missing"* / *"/trace-gaps"* | **`/trace-gaps` prompt** → cross-domain DNG/EWM/ETM scan | Reports reqs without implementing tasks, reqs without validating test cases, orphan tasks, orphan tests. Ends with a pointer to AI Hub for semantic gap analysis. Read-only. |
+| *"start a new project"* / *"set up a DO-178C / ISO 26262 / IEC 62304 project"* / *"/project-scaffold"* / *"/init-do-178c"* / *"/init-iso-26262"* | **`/project-scaffold`** for general pre-flight; **`/init-do-178c`** / **`/init-iso-26262`** for compliance regimes | Four-layer interview (organizational + regulatory + ELM structure + cross-tool linking) before the first 'shall' gets written. Compliance presets surface the exact artifact types / attributes / link types / lifecycle states for the regime. |
 | *"import these requirements"* / pastes plain reqs text | `/import-requirements` | Single-artifact import to DNG module |
 | *"show me the reqs in [module]"* / *"what's in DNG"* | `connect_to_elm` → `list_projects` → `get_modules` → `get_module_requirements` | Pure read flow |
 | *"resume my last build"* / *"pick up where I left off"* | `build_project_resume` | Loads disk-persisted run state |
@@ -43,7 +45,7 @@ The MCP has 60+ tools but the user mostly invokes ~10 starting points. Find thei
 | *"are you connected"* / *"what version"* / *"is something broken"* | `elm_mcp_health` | One-shot diagnostic |
 | *"update yourself"* | `update_elm_mcp` | Single tool call, no per-step prompts |
 
-**The point of this table:** the user doesn't experience "60 tools" — they experience these 14 starting points. Most flows take care of the rest internally. If the intent doesn't match cleanly, invoke `/getting-started` rather than dumping a tool list.
+**The point of this table:** the user doesn't experience "60 tools" — they experience these 17 starting points. Most flows take care of the rest internally. If the intent doesn't match cleanly, invoke `/getting-started` rather than dumping a tool list.
 
 ## 🛑 NEVER ignore a module-bind warning from `create_requirements`
 
