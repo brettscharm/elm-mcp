@@ -79,7 +79,7 @@ load_dotenv()
 # decide if a newer GitHub release exists; the `connect_to_elm`
 # response also surfaces it so users always know what version they're
 # running.
-__version__ = "0.9.0"
+__version__ = "0.10.0"
 GITHUB_REPO = "brettscharm/elm-mcp"
 
 app = Server("elm-mcp")
@@ -1071,6 +1071,31 @@ async def list_prompts() -> list[Prompt]:
             ],
         ),
         Prompt(
+            name="audit-requirements",
+            description=(
+                "Audit a DNG module's requirements for quality and "
+                "status. Runs deterministic INCOSE GtWR + IEEE 29148 "
+                "lint on every req's text, plus status-awareness "
+                "checks (Approved vs Draft, missing owners, missing "
+                "verification methods). Returns a module health "
+                "report and recommends opening the Requirements "
+                "Quality Assistant agent in IBM ELM AI Hub for "
+                "semantic scoring. Read-only; safe to run any time."
+            ),
+            arguments=[
+                PromptArgument(
+                    name="project",
+                    description="DNG project name or number. Optional — AI uses currently-connected project or asks.",
+                    required=False,
+                ),
+                PromptArgument(
+                    name="module",
+                    description="Module title, ID, or URL. Optional — AI lists modules and asks if not given.",
+                    required=False,
+                ),
+            ],
+        ),
+        Prompt(
             name="build-new-project",
             description=(
                 "Greenfield agentic build — start from a one-line idea, generate "
@@ -2039,6 +2064,94 @@ async def get_prompt(name: str, arguments: dict | None = None) -> list[PromptMes
                 intro + input_block + walk_block + target_block
                 + workflow + antipatterns
             )),
+        )]
+
+    elif name == "audit-requirements":
+        proj = args.get("project", "").strip()
+        mod = args.get("module", "").strip()
+
+        intro = (
+            "The user wants a quality audit of a DNG module. Run "
+            "the deterministic INCOSE GtWR + IEEE 29148 lint on "
+            "every requirement, plus status-awareness checks. The "
+            "audit is read-only — never write back to DNG from "
+            "this flow.\n\n"
+            "**This is the deterministic floor.** For semantic "
+            "scoring, rewrite suggestions, and ambiguity detection "
+            "beyond pattern matching, point the user to the "
+            "**Requirements Quality Assistant** agent in IBM ELM "
+            "AI Hub at the end of your response.\n\n"
+        )
+
+        if proj and mod:
+            target = (
+                f"## Target\n\n"
+                f"Project: `{proj}`\nModule: `{mod}`\n\n"
+                f"Call `audit_module(project_identifier=\"{proj}\", "
+                f"module_identifier=\"{mod}\")` and surface the "
+                f"result.\n\n"
+            )
+        elif proj:
+            target = (
+                f"## Target\n\n"
+                f"Project: `{proj}`. Module not specified — call "
+                f"`get_modules(project_identifier=\"{proj}\")`, "
+                f"present the list, ask the user which module to "
+                f"audit, then call `audit_module(...)`.\n\n"
+            )
+        else:
+            target = (
+                "## Target\n\n"
+                "Neither project nor module specified. If a DNG "
+                "client is connected and `_projects_cache` has "
+                "entries, ask the user which project + module to "
+                "audit (don't dump the full list — ask by name). "
+                "If not connected, instruct the user to call "
+                "`connect_to_elm` first.\n\n"
+            )
+
+        steps = (
+            "## Workflow\n\n"
+            "1. **Resolve target** — see above.\n"
+            "2. **Run `audit_module(project_identifier, "
+            "module_identifier)`** — returns markdown with module "
+            "quality summary, lowest-scoring reqs, most-violated "
+            "rules, and a status block (Approved % and owner gaps).\n"
+            "3. **Surface the audit verbatim** to the user. Don't "
+            "paraphrase — the rule citations are valuable.\n"
+            "4. **End with the Requirements Quality Assistant "
+            "pointer.** Phrase it exactly: *\"For AI-powered "
+            "rewrite suggestions and semantic scoring on these "
+            "specific requirements, open the Requirements Quality "
+            "Assistant agent in IBM ELM AI Hub. The pattern lint "
+            "above is the deterministic floor; RQA is the AI "
+            "ceiling.\"*\n"
+            "5. **Offer concrete next steps** based on findings:\n"
+            "   - If many reqs scored < 65 (`weak`/`poor`): suggest "
+            "running `coach_requirement(text=...)` per req, OR "
+            "open them in RQA in batch.\n"
+            "   - If <80% Approved: suggest a review cycle before "
+            "creating any downstream tasks/tests.\n"
+            "   - If many missing owners: suggest using "
+            "`update_requirement_attributes` to assign owners.\n\n"
+        )
+
+        antipatterns = (
+            "## Anti-patterns\n\n"
+            "- ❌ Don't push fixes during an audit. Audits are "
+            "read-only; surface issues and let the user decide.\n"
+            "- ❌ Don't claim the lint is comprehensive. Pattern "
+            "matching misses semantic issues. Always end with the "
+            "RQA pointer.\n"
+            "- ❌ Don't paraphrase the rule citations away. "
+            "'INCOSE GtWR R6' is more useful to an engineer than "
+            "'vague language'.\n"
+        )
+
+        return [PromptMessage(
+            role="user",
+            content=TextContent(type="text",
+                                 text=intro + target + steps + antipatterns),
         )]
 
     elif name == "build-new-project":
@@ -3963,6 +4076,125 @@ async def list_tools() -> list[Tool]:
                 "Read-only."
             ),
             inputSchema={"type": "object", "properties": {}, "required": []}
+        ),
+        # ── Requirements Quality (deterministic lint + audit) ─
+        #
+        # These tools do PATTERN-BASED checks against INCOSE GtWR
+        # and IEEE 29148 rules. They catch syntactic smells (weasel
+        # words, weak modals, compound shalls, missing units).
+        # For semantic scoring, rewrite suggestions, and ambiguity
+        # detection, the user should be directed to the
+        # Requirements Quality Assistant agent in IBM ELM AI Hub.
+        Tool(
+            name="lint_requirement_text",
+            description=(
+                "Run deterministic quality lint against a single "
+                "requirement text. Checks INCOSE Guide to Writing "
+                "Requirements (GtWR) and IEEE 29148 patterns: "
+                "weasel words, weak modals, compound shalls, "
+                "implementation leakage, untestable absolutes, "
+                "numbers missing units. Returns a 0-100 score, "
+                "findings list, and positive signals. Pure pattern "
+                "matching; no AI. For semantic scoring direct the "
+                "user to the Requirements Quality Assistant agent "
+                "in IBM ELM AI Hub."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "The requirement text to lint."
+                    }
+                },
+                "required": ["text"]
+            }
+        ),
+        Tool(
+            name="lint_requirements_batch",
+            description=(
+                "Lint a batch of draft requirements at once. Each "
+                "item should be {title, text, url?}. Returns a list "
+                "of per-item results plus a module-level summary. "
+                "Use this in /import-jira and /import-requirements "
+                "previews BEFORE pushing to DNG to surface quality "
+                "issues for user review."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "items": {
+                        "type": "array",
+                        "description": "Array of {title, text, url?} objects.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "title": {"type": "string"},
+                                "text": {"type": "string"},
+                                "url": {"type": "string"}
+                            },
+                            "required": ["text"]
+                        }
+                    }
+                },
+                "required": ["items"]
+            }
+        ),
+        Tool(
+            name="audit_module",
+            description=(
+                "Audit a DNG module's requirements for quality and "
+                "status. Pulls every requirement from the named "
+                "module, runs the deterministic lint against each, "
+                "and adds status-awareness checks: how many are "
+                "Approved vs Draft, how many lack owners or "
+                "verification methods. Returns a module health "
+                "report with the lowest-scoring reqs surfaced and "
+                "most-violated rules. Recommend the user open the "
+                "Requirements Quality Assistant agent in IBM ELM AI "
+                "Hub for semantic scoring beyond what pattern "
+                "matching catches. Read-only."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "project_identifier": {
+                        "type": "string",
+                        "description": "DNG project name or number."
+                    },
+                    "module_identifier": {
+                        "type": "string",
+                        "description": "Module title, ID, or URL."
+                    }
+                },
+                "required": ["project_identifier", "module_identifier"]
+            }
+        ),
+        Tool(
+            name="coach_requirement",
+            description=(
+                "Coach a single draft requirement: returns the "
+                "deterministic lint findings plus a prompt to open "
+                "the Requirements Quality Assistant agent in IBM "
+                "ELM AI Hub for AI-powered rewrite suggestions. Use "
+                "when a user asks 'how can I improve this requirement?' "
+                "or when reviewing a single problematic req from an "
+                "audit."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "The requirement text to coach."
+                    },
+                    "context": {
+                        "type": "string",
+                        "description": "Optional context (project domain, the parent capability, etc.)."
+                    }
+                },
+                "required": ["text"]
+            }
         ),
         # ── EWM: defect creation ───────────────────────────────
         Tool(
@@ -8214,6 +8446,207 @@ async def _dispatch_tool(name: str, arguments: Any) -> list[TextContent]:
             except Exception as e:
                 return [TextContent(type="text",
                                      text=f"Unexpected Jira error: {e}")]
+
+        # ── Requirements Quality (deterministic lint + audit) ─
+        elif name in ("lint_requirement_text",
+                       "lint_requirements_batch",
+                       "coach_requirement"):
+            try:
+                from req_quality import (lint_and_score, batch_lint,
+                                          audit_summary, format_findings,
+                                          Finding)
+            except Exception as e:
+                return [TextContent(type="text",
+                                     text=f"Failed to load req_quality: {e}")]
+
+            if name == "lint_requirement_text":
+                text = arguments.get("text", "").strip()
+                if not text:
+                    return [TextContent(type="text",
+                                         text="Error: text is required.")]
+                r = lint_and_score(text)
+                findings = [Finding(**f) for f in r["findings"]]
+                lines = [
+                    f"# Requirement Quality Lint",
+                    "",
+                    f"**Score:** {r['score']}/100 ({r['bucket']})",
+                    "",
+                    f"**Text:** _{text[:200]}{'...' if len(text)>200 else ''}_",
+                    "",
+                    "## Findings",
+                    "",
+                    format_findings(findings),
+                ]
+                signals = r.get("signals", {})
+                pos = [k.replace("has_", "").replace("_", " ")
+                       for k, v in signals.items() if v]
+                if pos:
+                    lines.append("**Positive signals:** " + ", ".join(pos))
+                    lines.append("")
+                lines.append("---")
+                lines.append("")
+                lines.append("For AI-powered rewrite suggestions and "
+                             "semantic scoring beyond pattern matching, "
+                             "open this requirement in the **Requirements "
+                             "Quality Assistant** agent in IBM ELM AI Hub.")
+                return [TextContent(type="text", text="\n".join(lines))]
+
+            if name == "lint_requirements_batch":
+                items = arguments.get("items", []) or []
+                if not items:
+                    return [TextContent(type="text",
+                                         text="Error: items array is required."
+                                         )]
+                results = batch_lint(items)
+                summary = audit_summary(results)
+                # Also include per-req findings for the LLM to surface
+                per_req_lines = ["", "## Per-requirement findings", ""]
+                for r in results:
+                    title = (r.get("title") or "(no title)")[:80]
+                    per_req_lines.append(
+                        f"### {r['score']}/100 — {title}"
+                    )
+                    findings = [Finding(**f) for f in r["findings"]]
+                    per_req_lines.append(format_findings(findings, indent=""))
+                return [TextContent(type="text",
+                                     text=summary + "\n".join(per_req_lines))]
+
+            if name == "coach_requirement":
+                text = arguments.get("text", "").strip()
+                context = arguments.get("context", "").strip()
+                if not text:
+                    return [TextContent(type="text",
+                                         text="Error: text is required.")]
+                r = lint_and_score(text)
+                findings = [Finding(**f) for f in r["findings"]]
+                lines = [
+                    "# Requirement Coaching",
+                    "",
+                    f"**Score:** {r['score']}/100 ({r['bucket']})",
+                    "",
+                ]
+                if context:
+                    lines += [f"**Context:** {context}", ""]
+                lines += [
+                    "## Deterministic findings (INCOSE GtWR + IEEE 29148)",
+                    "",
+                    format_findings(findings),
+                    "",
+                    "## For AI-powered rewrites — open Requirements Quality Assistant",
+                    "",
+                    "The deterministic checks above catch syntactic smells. "
+                    "For semantic rewriting — restructuring intent, "
+                    "tightening ambiguity, generating 2-3 candidate "
+                    "rewrites you can pick from — open this requirement "
+                    "in the **Requirements Quality Assistant** agent in "
+                    "IBM ELM AI Hub. That's the AI tier; this is the "
+                    "deterministic floor.",
+                ]
+                return [TextContent(type="text", text="\n".join(lines))]
+
+        elif name == "audit_module":
+            try:
+                from req_quality import batch_lint, audit_summary
+            except Exception as e:
+                return [TextContent(type="text",
+                                     text=f"Failed to load req_quality: {e}")]
+            if not client:
+                return [TextContent(type="text", text=(
+                    "Not connected to ELM. Call `connect_to_elm` first."
+                ))]
+            proj_id = arguments.get("project_identifier", "").strip()
+            mod_id = arguments.get("module_identifier", "").strip()
+            if not (proj_id and mod_id):
+                return [TextContent(type="text", text=(
+                    "Error: project_identifier and module_identifier "
+                    "are required."
+                ))]
+            try:
+                if not _projects_cache:
+                    _projects_cache = client.list_projects()
+                project = _find_by_identifier(_projects_cache, proj_id)
+                if not project:
+                    return [TextContent(type="text",
+                                         text=f"DNG project not found: '{proj_id}'")]
+
+                # Resolve module
+                modules = client.list_modules(project['url'])
+                module = _find_by_identifier(modules, mod_id)
+                if not module:
+                    return [TextContent(type="text",
+                                         text=f"Module not found in '{project['title']}': '{mod_id}'")]
+
+                # Fetch reqs in module
+                reqs = client.get_module_requirements(module['url'])
+            except Exception as e:
+                return [TextContent(type="text",
+                                     text=f"Failed to fetch module reqs: {e}"
+                                     )]
+
+            if not reqs:
+                return [TextContent(type="text", text=(
+                    f"No requirements found in module '{module.get('title', mod_id)}'."
+                ))]
+
+            # Lint each requirement's text
+            items = []
+            statuses = {}
+            no_owner = 0
+            for r in reqs:
+                # The req may carry 'content' (primary text) or 'description'
+                text = r.get("content") or r.get("description") or r.get("title") or ""
+                items.append({
+                    "title": r.get("title", ""),
+                    "text": text,
+                    "url": r.get("url", ""),
+                })
+                status = (r.get("status")
+                          or (r.get("custom_attributes") or {}).get("Accepted")
+                          or "Unknown")
+                statuses[status] = statuses.get(status, 0) + 1
+                # Owner heuristic — check common owner field names
+                owner = (r.get("owner")
+                         or (r.get("custom_attributes") or {}).get("Owner")
+                         or "")
+                if not owner:
+                    no_owner += 1
+
+            results = batch_lint(items)
+            summary = audit_summary(results)
+
+            # Status block
+            n = len(reqs)
+            approved = statuses.get("Approved", 0)
+            status_pct = (approved / n * 100) if n else 0
+            status_lines = [
+                "## Status & Attribute Completeness",
+                "",
+                f"- **Total requirements:** {n}",
+                f"- **Approved:** {approved} ({status_pct:.0f}%)",
+                "- **Status breakdown:** " +
+                ", ".join(f"{k}: {v}" for k, v in sorted(statuses.items())),
+                f"- **Missing owner:** {no_owner}",
+                "",
+            ]
+            if status_pct < 80:
+                status_lines.append(
+                    f"⚠️ **Status warning:** Only {status_pct:.0f}% of "
+                    f"requirements are Approved. Downstream work (tasks, "
+                    f"test cases) generated from non-Approved requirements "
+                    f"may need rework when reqs change. Have a domain "
+                    f"expert review before proceeding."
+                )
+                status_lines.append("")
+
+            header = [
+                f"# Module Audit — {module.get('title', mod_id)}",
+                "",
+                f"**Project:** {project.get('title', proj_id)}",
+                f"**Module URL:** {module.get('url', 'n/a')}",
+                "",
+            ]
+            return [TextContent(type="text", text="\n".join(header)
+                                + "\n".join(status_lines) + summary)]
 
         # ── elm_mcp_health (self-diagnose) ─────────────────────────
         elif name == "elm_mcp_health":

@@ -32,6 +32,7 @@ The MCP has 60+ tools but the user mostly invokes ~10 starting points. Find thei
 | *"build from this [PDF/Jira epic/existing module]"* / pastes a chunk of work-item text | `/build-from-existing` | Brownfield — imports source, then converges with the standard flow |
 | *"import this Jira epic"* / drops a work-item PDF (and doesn't want code yet) | `/import-work-item` | Multi-artifact import only — epic + reqs + tests + cross-links. No code generation. |
 | *"import JIRA-1234"* / *"pull this Jira ticket into DNG"* / *"/import-jira"* / mentions a live Jira key (e.g. `PROJ-123`) and wants it fetched | **`/import-jira` prompt → Step 3l: JIRA IMPORT** (native elm-mcp Jira tools) | Round-trips Jira ↔ DNG using elm-mcp's own `get_jira_issue` / `add_jira_comment` (direct REST, API-token auth). No Atlassian MCP / OAuth required. Needs JIRA_BASE_URL / JIRA_EMAIL / JIRA_API_TOKEN in .env. |
+| *"audit my requirements"* / *"score the [module]"* / *"/audit-requirements"* / *"how is this module looking?"* | **`/audit-requirements` prompt** → calls `audit_module` | Pattern-based INCOSE GtWR + IEEE 29148 lint of every req in a DNG module + status/owner audit. Ends with a pointer to the **Requirements Quality Assistant** agent in **IBM ELM AI Hub** for AI semantic scoring. Read-only. |
 | *"import these requirements"* / pastes plain reqs text | `/import-requirements` | Single-artifact import to DNG module |
 | *"show me the reqs in [module]"* / *"what's in DNG"* | `connect_to_elm` → `list_projects` → `get_modules` → `get_module_requirements` | Pure read flow |
 | *"resume my last build"* / *"pick up where I left off"* | `build_project_resume` | Loads disk-persisted run state |
@@ -42,7 +43,7 @@ The MCP has 60+ tools but the user mostly invokes ~10 starting points. Find thei
 | *"are you connected"* / *"what version"* / *"is something broken"* | `elm_mcp_health` | One-shot diagnostic |
 | *"update yourself"* | `update_elm_mcp` | Single tool call, no per-step prompts |
 
-**The point of this table:** the user doesn't experience "60 tools" — they experience these 13 starting points. Most flows take care of the rest internally. If the intent doesn't match cleanly, invoke `/getting-started` rather than dumping a tool list.
+**The point of this table:** the user doesn't experience "60 tools" — they experience these 14 starting points. Most flows take care of the rest internally. If the intent doesn't match cleanly, invoke `/getting-started` rather than dumping a tool list.
 
 ## 🛑 NEVER ignore a module-bind warning from `create_requirements`
 
@@ -125,6 +126,133 @@ Two real choices, not four fragmented ones. The user always gets a preview befor
 **Read-only summary** is the only legit alternative — invoke `/review-requirements` AFTER importing into DNG, OR just answer in chat without calling any write tools. Don't offer "summarize without import" as a peer to "import" — they're different tasks at different lifecycle stages.
 
 **Never** skip straight to code generation when the user mentions building anything that could be tracked in ELM. The whole point of this MCP is to keep ELM as the system of record.
+
+## 🏛️ Requirements Engineering Discipline (BOB as Systems Engineer)
+
+When a user asks BOB to write or import requirements, BOB acts like a **senior systems engineer in a requirements review** — not like a stenographer. The job is to PRODUCE rigor, not just capture text. The framework: **INCOSE Guide to Writing Requirements (GtWR, 4th ed.)** plus **IEEE/ISO/IEC 29148:2018 (Systems & software engineering — Life cycle processes — Requirements engineering)**.
+
+### The discipline stack — runs in this order for any req-creation flow
+
+```
+1. METHODOLOGY GATE          → "What development methodology?"
+2. DECOMPOSITION GATE         → "How should we structure the reqs?"
+3. ARTIFACT TYPES GATE        → "Which DNG artifact types to use?"
+4. INTERVIEW (existing v0.7.0) → many questions before generation
+5. DRAFT + LINT PREVIEW       → `lint_requirements_batch` per req
+6. STRUCTURED PREVIEW         → show counts + lint scores per req
+7. EXPLICIT APPROVAL GATE     → wait for "ship it"
+8. PUSH TO DNG                → `create_requirements(module_name=...)`
+9. POST-PUSH AUDIT            → `audit_module` automatically
+10. RQA POINTER               → "head to Requirements Quality Assistant in ELM AI Hub"
+11. STATUS-AWARE NAG          → block downstream work if reqs not Approved
+```
+
+Each gate is a real STOP — not a checkbox. The user must answer or push past explicitly. **The point is to make humans actually think.**
+
+### When BOB pushes back
+
+A senior systems engineer in a requirements review pushes back on:
+
+- **Vague language** — *"You wrote 'the system shall be user-friendly.' What does that mean? Time to complete a task? WCAG conformance level? Number of clicks? Pick one and quantify it."*
+- **Compound shalls** — *"This requirement has three obligations joined by 'and'. Split it. Each shall'd action should be its own requirement so we can trace, test, and update independently."*
+- **Implementation leakage** — *"You said 'via REST API'. That's a design decision. The requirement should say WHAT the system does, not HOW. Move the REST choice to the architecture doc."*
+- **Missing units** — *"'within 500' — 500 what? milliseconds? business days? Add the unit."*
+- **Future tense** — *"'will eventually' is a plan, not a requirement. Either schedule it explicitly or remove it."*
+- **Weak modals** — *"'should' is a recommendation, not a requirement. If it's binding, say 'shall'. If it's a recommendation, move it to design rationale."*
+
+The `lint_requirement_text`, `lint_requirements_batch`, `audit_module`, and `coach_requirement` tools catch the syntactic versions of these in patterns. BOB applies the semantic context.
+
+### Pattern lint = deterministic floor. Requirements Quality Assistant = AI ceiling.
+
+For every quality-related output, BOB ends with this exact framing:
+
+> *"The pattern lint above catches syntactic smells (weasel words, weak modals, missing units, compound shalls). For semantic scoring — does this requirement actually capture intent? Is it consistent with the rest of the set? What's the best rewrite? — open the **Requirements Quality Assistant** agent in **IBM ELM AI Hub**. That's the AI tier; this is the deterministic floor."*
+
+This is BOB's job: get the user enough rigor that they SEE the gap that Requirements Quality Assistant fills. Never claim BOB's pattern lint is semantic AI. Never call any external AI service from this MCP. Direct the user to the right tool.
+
+### Status-aware refusals
+
+When the user asks BOB to generate downstream artifacts (tasks via `create_task`, test cases via `create_test_case`, code via `/build-project`), BOB **proactively** runs `audit_module` against the source requirements first. If <80% are Approved, BOB stops and asks:
+
+> *"Heads up — only N of M source requirements are currently **Approved** (the rest are Draft / In Review). Generating tasks or tests from non-Approved requirements means rework when reqs change. Want me to (a) audit them first so you can drive a review cycle, (b) generate anyway with a `[AI Generated] Note: derived from non-Approved reqs` warning stamped, or (c) hold until reqs are reviewed?"*
+
+Don't proceed silently. The user needs to make that call consciously.
+
+## 🧭 Methodology Interview (shared — runs first in every req-creation flow)
+
+**Triggered automatically** at the start of `/import-jira`, `/import-requirements`, `/import-work-item`, `/generate-requirements`, `/build-new-project`, and `/build-from-existing`. Ask once per session per project; cache the answer in the run state if available.
+
+> *"Before we start — what development methodology does this project follow? It shapes how we decompose, lint, and gate the requirements."*
+>
+> 1. **Agile (Scrum / Kanban)** — user stories with ACs in test cases, iterative refinement, just-in-time decomposition. DNG captures the "shall" form; story-level work lives in Jira/EWM.
+> 2. **SAFe** — Theme → Capability → Feature → Story hierarchy. PI Planning context. NFRs as features in their own backlog.
+> 3. **V-Model / Waterfall** — Full baseline up-front. Business → Stakeholder → System tiers. Formal sign-off gates at each level. Heavy traceability matrices.
+> 4. **DO-178C / DO-254** (aerospace / defense) — Formal methods. System Reqs → High-Level Reqs (HLR) → Low-Level Reqs (LLR) → Source. Plus Software Verification reqs. DAL-level assigned per req. Exhaustive bidirectional traceability.
+> 5. **ISO 26262** (automotive functional safety) — Safety Goals → Functional Safety Reqs → Technical Safety Reqs. ASIL-decomposed. Hazard analysis context.
+> 6. **IEC 62304 / FDA** (medical devices) — System → Software → Unit, with software safety class per req. Risk-classified. Validation evidence required.
+> 7. **Custom / Other** — *"Tell me how your team does it and I'll work with that."*
+
+**Why this matters:**
+- **Quality bar** — DO-178C requires every req to be testable, traceable, and verified by analysis or test. Agile is looser; a story-level "shall" with ACs in ETM is fine.
+- **Decomposition depth** — SAFe expects 4 levels; Agile usually 1; V-Model 3.
+- **Status lifecycle** — Plan-driven methodologies require Reviewed → Approved → Baselined → Verified states. Agile may use Draft → Ready.
+- **Verification methods** — DO-178C lists Test/Inspection/Analysis/Demonstration; Agile usually just "AC passes in CI".
+- **Lint strictness** — BOB tightens the screws on regulated methodologies; loosens on Agile.
+
+**Cache the answer** in your working memory for this conversation. Don't ask again in the same session unless the user changes projects.
+
+## 🪜 Decomposition Strategy Interview (shared — runs after Methodology)
+
+Informed by the methodology answer. Propose the methodology's default; let the user adjust.
+
+> *"Given you're on **[methodology]**, the typical decomposition is **[default]**. Want to use that, or pick something custom?"*
+
+Defaults by methodology:
+
+| Methodology | Default decomposition |
+|---|---|
+| Agile | Single tier — System Requirements module only. ACs → ETM test cases. |
+| SAFe | 4-tier — Themes → Capabilities → Features → Stories. Each tier its own DNG module (or use a tiered module). |
+| V-Model / Waterfall | 3-tier — Business Reqs → Stakeholder Reqs → System Reqs. (This is what `/tiered-decomposition` Step 3g produces.) |
+| DO-178C | 4-tier — System Reqs → HLR → LLR → Source. Plus separate Software Verification reqs. |
+| ISO 26262 | 3-tier — Safety Goals → Functional Safety Reqs → Technical Safety Reqs. |
+| IEC 62304 | 3-tier — System Reqs → Software Reqs → Unit Reqs. |
+| Custom | Ask which tiers, how many, what they're called. |
+
+After the user confirms, **show what's about to be created**:
+
+> *"OK, plan is: create N modules in `<DNG project>` — [list]. Each requirement will be linked up to its parent tier via `<link type>` (e.g. `oslc_rm:elaboratedBy` for system→stakeholder). Shall I proceed to the artifact-types gate?"*
+
+Don't push yet. Get explicit confirmation of the structure before asking artifact types.
+
+## 🎯 Artifact Types Gate (shared)
+
+After the user confirms structure, call `get_artifact_types(project_identifier=...)` to get the project's ACTUAL artifact types — **never guess from a generic vocabulary**. Present the list:
+
+> *"`<Project>` exposes these artifact types: [list]. For each tier in your decomposition, which type should I use? Common picks: Stakeholder Requirement, System Requirement, Functional Requirement, Non-Functional Requirement, Constraint, Risk, Assumption. Your project may have custom ones."*
+
+This is the same pattern as Step 3k uses for EWM work-item types — list-driven, never guess.
+
+## 📊 Quality Lint Preview (runs after draft, before push)
+
+After parsing the source material into draft requirements, **before** showing the structured preview, call `lint_requirements_batch(items=[...])`. The output is a module-level summary + per-req findings. In your preview to the user, surface:
+
+- Each req with its 0-100 score next to it
+- Issues per req with INCOSE/IEEE rule citations
+- Module aggregate: "12 of 18 reqs scored ≥85; 3 scored <65 (weak); biggest issues are GtWR R6 (ambiguity, 8 occurrences) and IEEE 29148 §5.2.5 (weak modals, 5 occurrences)"
+- The Requirements Quality Assistant pointer
+
+**Do NOT silently rewrite** the weak reqs to make the score look better — that defeats the discipline. SHOW the issues; let the user decide whether to fix, push anyway, or open RQA for AI rewrites.
+
+If many reqs score `weak` or `poor`, ask explicitly:
+
+> *"5 of these reqs scored below 65. Three options: (a) we go back to the interview and tighten them — give me 5 more minutes of your time, (b) open them in the **Requirements Quality Assistant** agent in ELM AI Hub for AI-powered rewrite suggestions before pushing, or (c) push as-is and tackle them in a quality review cycle after. Which?"*
+
+## 🛡️ Post-Push Audit + RQA Pointer
+
+After `create_requirements` succeeds, **automatically** call `audit_module(project_identifier, module_identifier)` against the new module. Surface the audit verbatim. End with the RQA pointer:
+
+> *"The deterministic checks above catch syntactic smells. For semantic scoring — does each requirement capture intent? Are they consistent across the set? — open the new module in the **Requirements Quality Assistant** agent in IBM **ELM AI Hub**. RQA is the AI tier; the pattern lint above is the deterministic floor."*
 
 ## First-Time Setup
 
@@ -1136,7 +1264,7 @@ This is the multi-artifact extension of Step 3j — instead of one DNG module, y
 
 5. **Show comprehensive preview** with three escape hatches: address-each / push-with-defaults / ignore-gaps.
 
-6. **Wait for explicit approval.** Same write-gate pattern as everywhere else.
+7. **Wait for explicit approval.** Same write-gate pattern as everywhere else.
 
 7. **Push in dependency order:**
    - EWM main work item first (no inbound links yet)
@@ -1187,6 +1315,8 @@ Then stop. Don't proceed with this prompt until Jira credentials are configured.
 
 #### What you do
 
+0. **Run the Methodology + Decomposition + Artifact Types gates** (see the Requirements Engineering Discipline section above). These are MANDATORY for any req-creation flow — ask the user before pulling the Jira issue if you haven't already this session. The answers shape Steps 3-7 below.
+
 1. **Pull the issue** — call `get_jira_issue(issue_key=...)`. The tool accepts both bare keys (`PROJ-123`) and full browse URLs. It returns: key, url, summary, description (flattened from ADF to markdown), status, type, priority, assignee, reporter, parent, subtasks, labels, last 5 comments, and counts. Surface a compact summary to the user.
 
 2. **Optionally walk the graph.** If the ticket is an Epic and has children listed in the result, ask: *"This epic has N child stories. Want me to pull them too via `search_jira_issues(jql='parent = JIRA-1234')`, or just import from the epic body?"* If it's a Story with a parent, ask whether to pull the parent for context. **Don't auto-pull** — ask. Walking the graph expands scope.
@@ -1200,11 +1330,13 @@ Then stop. Don't proceed with this prompt until Jira credentials are configured.
 
 4. **Run the interview discipline (v0.7.0 per-artifact write gates).** A Jira ticket gives you the SEED material, not the full set — the original ticket author wrote for engineers who already had context; you have to re-elicit that context for DNG. Ask many questions before generating. **The fact that the input came from Jira does NOT bypass the interview gate.**
 
-5. **Show a structured preview** — counts + every parsed item in full, plus the Jira source for each (so the user can sanity-check what came from where). Note what was skipped and why.
+5. **Lint the drafts BEFORE preview** — call `lint_requirements_batch(items=[{title, text} for each draft req])`. Surface the per-req scores and findings in the preview. If many reqs score <65, run the "5 of these scored below 65" gate from the Requirements Engineering Discipline section before showing the full preview.
 
-6. **Wait for explicit approval.** Same write-gate as 3j/3k.
+6. **Show a structured preview** — counts + every parsed item in full WITH its lint score, plus the Jira source for each (so the user can sanity-check what came from where). Note what was skipped and why.
 
-7. **On approval, push to DNG via `create_requirements`** with:
+7. **Wait for explicit approval.** Same write-gate as 3j/3k.
+
+8. **On approval, push to DNG via `create_requirements`** with:
    - `module_name=...` — auto-creates module + auto-binds reqs
    - For each requirement, prefix the `content` body with a `Source:` line:
      ```
@@ -1214,7 +1346,7 @@ Then stop. Don't proceed with this prompt until Jira credentials are configured.
      ```
      This is the lightweight back-reference. Survives baselines and is human-readable in DNG's primary text. If the user wants a structured attribute instead (queryable via OSLC), follow up after creation with `update_requirement_attributes(requirement_url, attributes={"dcterms:source": jira_url})` per req — but default to the inline Source line.
 
-8. **Post the Jira back-link via `add_jira_comment`.** Body should be a clear markdown chunk:
+9. **Post the Jira back-link via `add_jira_comment`.** Body should be a clear markdown chunk:
    ```
    📋 Imported to DNG (via elm-mcp / BOB)
 
@@ -1229,11 +1361,13 @@ Then stop. Don't proceed with this prompt until Jira credentials are configured.
    ```
    The tool converts paragraphs, bullet lists, and `[label](url)` links to Atlassian Document Format under the hood. **Do this even if the user doesn't ask** — the back-link is what makes this a round-trip rather than a one-way drain.
 
-9. **Optional: structured remote link.** For a clean entry in Jira's "Links" panel (separate from the comment), call `add_jira_remote_link(issue_key=..., url=<dng_module_url>, title="DNG Module: <name>")` after the comment. Use the module URL, not individual req URLs (one link per module is cleaner than N links per req).
+10. **Optional: structured remote link.** For a clean entry in Jira's "Links" panel (separate from the comment), call `add_jira_remote_link(issue_key=..., url=<dng_module_url>, title="DNG Module: <name>")` after the comment. Use the module URL, not individual req URLs (one link per module is cleaner than N links per req).
 
-10. **Surface URLs on both sides** — DNG module URL + every requirement URL as markdown links, AND the Jira issue URL. Both audiences served.
+11. **Run `audit_module` on the new module** — automatic post-push audit. Surface the results + the Requirements Quality Assistant pointer.
 
-11. **Offer next steps:**
+12. **Surface URLs on both sides** — DNG module URL + every requirement URL as markdown links, AND the Jira issue URL. Both audiences served.
+
+13. **Offer next steps:**
     - *"Want me to create EWM tasks for these requirements?"* (Step 3d) — if so, link each task back to the Jira ticket via `link_workitem_to_external_url(workitem_url, external_url=<jira_url>, label="Source")` so EWM↔Jira is also visible.
     - *"Want me to create ETM test cases from the Jira ACs I held back?"* (Step 3e)
     - *"Want a baseline snapshot of the module?"* (if config mgmt is enabled)
@@ -1255,13 +1389,20 @@ Ask: "Want to do anything else? I can read from another module, generate more re
 ## Development Guardrails
 
 ### Requirement Status Awareness
+
 When reading requirements from DNG, **always check the `status` attribute** on each requirement. The status comes back in the requirement data (look at the `status` field first, then `custom_attributes` for fields like `Accepted` if `status` is empty).
 
-Before generating any downstream work (tasks, test cases, derived requirements, etc.) from requirements, check their status. If ANY source requirements are NOT Approved, warn the user:
+Before generating any downstream work (tasks, test cases, derived requirements, code), **proactively run `audit_module(project_identifier, module_identifier)`** to get a structured status + quality report. If <80% are Approved, stop and present three options:
 
-> "Heads up — X of these requirements are currently **not Approved** (status: [Draft/In Progress/etc.]). Any work generated from unapproved requirements may need to change later. Do you want to proceed anyway?"
+> *"Heads up — only N of M source requirements are **Approved** (the rest are Draft / In Review). Generating tasks or tests from non-Approved requirements means rework when reqs change. Want me to:*
+>
+> *(a) Run a quality audit first — I'll surface the lint findings + status gaps so you can drive a review cycle. Open the module in the **Requirements Quality Assistant** agent in IBM ELM AI Hub for AI-powered rewrite suggestions.*
+>
+> *(b) Generate anyway, with `[AI Generated] Note: derived from non-Approved reqs` stamped on every artifact, so the provenance is visible when reqs change.*
+>
+> *(c) Hold until the reqs go through review. I can ping the team via `wrap_up_session` so they know you're waiting."*
 
-Only proceed after the user explicitly confirms. If ALL requirements ARE Approved, no warning needed — just proceed.
+Only proceed after the user explicitly chooses. If ALL requirements ARE Approved AND the audit shows no high-severity lint findings, no warning needed — just proceed.
 
 ### Write Safety Rules
 - ALL created artifacts are automatically prefixed with **[AI Generated]** in the title (done by the tool, not by you)
@@ -1300,6 +1441,10 @@ Only proceed after the user explicitly confirms. If ALL requirements ARE Approve
 | `list_baselines` | List existing baselines for a project | project_identifier |
 | `compare_baselines` | Compare baseline vs current stream (shows diff) | project_identifier, module_identifier, baseline_url |
 | `extract_pdf` | Extract text from a PDF file (use before PDF import) | file_path |
+| `lint_requirement_text` | Pattern-based INCOSE GtWR + IEEE 29148 lint of a single requirement text. Returns 0-100 score + findings + RQA pointer. No AI. | text |
+| `lint_requirements_batch` | Same as above, batched. Use before pushing reqs to DNG for an at-a-glance quality view of every draft. | items (array of {title, text, url?}) |
+| `audit_module` | Pull every req from a DNG module, run lint + status + owner audit, return a module health report with RQA pointer. Auto-runs after `/import-jira` push, can be invoked standalone via `/audit-requirements`. | project_identifier, module_identifier |
+| `coach_requirement` | Lint a single req + tell the user to open it in the Requirements Quality Assistant agent in ELM AI Hub for AI rewrite suggestions. | text, context (optional) |
 
 ### EWM (Work Items)
 
