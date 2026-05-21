@@ -79,7 +79,7 @@ load_dotenv()
 # decide if a newer GitHub release exists; the `connect_to_elm`
 # response also surfaces it so users always know what version they're
 # running.
-__version__ = "0.10.0"
+__version__ = "0.10.1"
 GITHUB_REPO = "brettscharm/elm-mcp"
 
 app = Server("elm-mcp")
@@ -152,6 +152,28 @@ def _fetch_latest_version() -> Optional[str]:
         return None
 
 
+def _version_tuple(v: str) -> tuple:
+    """Parse 'X.Y.Z' (or 'vX.Y.Z') into a comparable tuple. Returns
+    (0,0,0) on any parse failure so 'unknown' versions compare equal
+    to the floor. Used to guarantee we never auto-DOWNGRADE because
+    the latest GitHub Release tag is older than the installed version."""
+    try:
+        s = (v or "").lstrip("v")
+        parts = s.split(".")
+        return tuple(int(p) for p in parts[:3] if p.isdigit()) or (0, 0, 0)
+    except Exception:
+        return (0, 0, 0)
+
+
+def _is_newer_version(latest: Optional[str], current: str) -> bool:
+    """True if `latest` is strictly newer than `current`. Both should be
+    semver-ish 'X.Y.Z' strings. Returns False if equal, older, or
+    unparseable — never auto-downgrade."""
+    if not latest:
+        return False
+    return _version_tuple(latest) > _version_tuple(current)
+
+
 def _git_pull() -> bool:
     """Hard-reset the install dir to origin/main. Returns True on success."""
     import subprocess
@@ -196,9 +218,13 @@ def _auto_update_at_startup() -> None:
         sys.stderr.flush()
         return
     _record_check_now()
-    if latest == __version__:
+    if not _is_newer_version(latest, __version__):
+        # latest is either equal to current OR OLDER (rare, but happens
+        # when the latest GitHub Release hasn't caught up with main).
+        # In either case: nothing to do — never auto-downgrade.
         sys.stderr.write(
-            f"[elm-mcp] v{__version__}: up to date.\n"
+            f"[elm-mcp] v{__version__}: up to date "
+            f"(latest release v{latest}).\n"
         )
         sys.stderr.flush()
         return
@@ -242,7 +268,9 @@ def _preflight_version_block() -> str:
         if latest is None:
             # Network failed — don't punish the user, just continue silently.
             return ""
-        if latest == __version__:
+        if not _is_newer_version(latest, __version__):
+            # Equal OR running ahead of latest published release —
+            # both are "fine, nothing to do" from the user's POV.
             return (
                 f"> ✅ Running ELM MCP **v{__version__}** (latest).\n\n"
             )
@@ -4374,15 +4402,24 @@ _TEAM_LOG_TOOLS_WRITE = {
     "create_test_result", "create_link", "link_workitem_to_external_url",
     "publish_build_state_to_dng", "generate_chart",
     "create_test_plan", "create_test_execution_record",
+    # Jira writes — cross-system back-link events worth logging.
+    "add_jira_comment", "add_jira_remote_link",
 }
 _TEAM_LOG_TOOLS_PHASE = {"build_project", "build_new_project",
                          "build_from_existing", "build_project_next"}
 _TEAM_LOG_TOOLS_RESEARCH = {"search_requirements", "query_work_items"}
 _TEAM_LOG_TOOLS_SESSION = {"connect_to_elm", "wrap_up_session"}
+# Quality / review tools — show up in "what has the team done" so a
+# director can see who ran a module audit, when, and what came back.
+# lint_requirement_text / coach_requirement / lint_requirements_batch
+# are intentionally NOT here — they fire many times per coaching
+# session and would drown out the signal.
+_TEAM_LOG_TOOLS_QUALITY = {"audit_module"}
 
 _TEAM_LOG_TOOLS_ALL = (
     _TEAM_LOG_TOOLS_WRITE | _TEAM_LOG_TOOLS_PHASE
     | _TEAM_LOG_TOOLS_RESEARCH | _TEAM_LOG_TOOLS_SESSION
+    | _TEAM_LOG_TOOLS_QUALITY
 )
 
 
@@ -4426,6 +4463,14 @@ def _summarize_tool_call(name: str, arguments: Any,
         label = "created cross-tool link"
     elif name == "link_workitem_to_external_url":
         label = f"linked work item to {args.get('external_url', '')}"
+    elif name == "add_jira_comment":
+        label = f"posted Jira comment on {args.get('issue_key', '')}"
+    elif name == "add_jira_remote_link":
+        label = f"added Jira remote link on {args.get('issue_key', '')} → {args.get('title', '')}"
+    elif name == "audit_module":
+        label = (f"audited module quality: "
+                 f"{args.get('module_identifier', '')} "
+                 f"(project {args.get('project_identifier', '')})")
     elif name == "publish_build_state_to_dng":
         label = "published build state to DNG"
     elif name == "wrap_up_session":
@@ -6438,10 +6483,24 @@ async def _dispatch_tool(name: str, arguments: Any) -> list[TextContent]:
                     f"Try again in a moment, or update manually:\n"
                     f"`curl -fsSL https://raw.githubusercontent.com/{GITHUB_REPO}/main/install.sh | bash`"
                 ))]
-            if latest == __version__:
+            if not _is_newer_version(latest, __version__):
+                # Either equal OR you're running AHEAD of latest published
+                # release (a tag/release wasn't created yet for the
+                # version on main). Don't downgrade — just report.
+                if _version_tuple(latest) == _version_tuple(__version__):
+                    return [TextContent(type="text", text=(
+                        f"Already on the latest version: **v{__version__}**. "
+                        f"Nothing to do."
+                    ))]
+                # latest < current: you're ahead of the latest tagged release.
                 return [TextContent(type="text", text=(
-                    f"Already on the latest version: **v{__version__}**. "
-                    f"Nothing to do."
+                    f"You're running **v{__version__}**, which is AHEAD of "
+                    f"the latest published GitHub release "
+                    f"(**v{latest}**). Nothing to update — auto-update "
+                    f"refuses to downgrade. (If a newer release was "
+                    f"supposed to exist, ask the maintainer to publish "
+                    f"a Release at "
+                    f"https://github.com/{GITHUB_REPO}/releases.)"
                 ))]
             if not _is_git_managed():
                 return [TextContent(type="text", text=(
