@@ -421,48 +421,59 @@ def format_audit_mermaid(audit_summary: Dict[str, Any]) -> str:
 
 # ── Convenience: wrap call from MCP handlers ────────────────
 
+_COPY_INSTRUCTION = (
+    "\n**To export / share this diagram:** copy everything between "
+    "the ✂️ markers above and paste into "
+    "[https://mermaid.live](https://mermaid.live). The editor will "
+    "load it instantly, and you can export PNG / SVG, share, or "
+    "embed. Click directives are preserved — every node remains "
+    "a clickable link to the ELM artifact.\n"
+)
+
+
+def _wrap_with_copy_markers(mermaid_block: str) -> str:
+    """Add visible ✂️ START / END COPY markers around the
+    ```mermaid``` fence so users can spot the copy region instantly.
+    Markers go OUTSIDE the fence so they don't interfere with
+    inline rendering.
+    """
+    return (
+        "✂️ START COPY ─────────────────────────────────\n"
+        + mermaid_block.rstrip() + "\n"
+        + "✂️ END COPY ─────────────────────────────────\n"
+    )
+
+
 def render_trace_block(items: List[Dict[str, Any]], **kwargs) -> str:
-    """Public entry: trace flowchart. Adds a tiny markdown header
-    explaining the click behavior, then the diagram block, then a
-    one-click Mermaid Live link for editing / exporting."""
+    """Public entry: trace flowchart. Header + diagram + copy
+    instruction + ELM AI Hub pointer footer. No long URLs."""
     body = format_trace_mermaid(items, **kwargs)
     if not body.strip().startswith("```"):
         return body  # already an empty-state message
     header = (
         "## Traceability diagram\n\n"
-        "_Every node is clickable in IBM Bob, Claude, GitHub, or "
-        "mermaid.live — opens the artifact in DNG / EWM / ETM. "
+        "_Every node in the diagram below is clickable when "
+        "rendered (in IBM Bob inline, or in mermaid.live after "
+        "copy/paste) — opens the artifact in DNG / EWM / ETM. "
         "Hover for status + owner._\n\n"
     )
-    live_link = mermaid_live_url(body)
-    link_block = (
-        f"\n**[📊 Open / edit in Mermaid Live]({live_link})** "
-        f"— full editor, export PNG/SVG, share. The diagram is "
-        f"encoded in the URL fragment (client-side only — never hits "
-        f"any server).\n"
-    ) if live_link else ""
     footer = (
         "\n_For AI-augmented diagrams (semantic link suggestions, "
         "change-impact heatmaps) point users at IBM ELM AI Hub. "
         "The map above is the deterministic floor._\n"
     )
-    return header + body + link_block + footer
+    return header + _wrap_with_copy_markers(body) + _COPY_INSTRUCTION + footer
 
 
 def render_audit_block(audit_summary: Dict[str, Any]) -> str:
-    """Public entry: audit pie. Adds a tiny markdown header, then the
-    diagram block, then a Mermaid Live edit link."""
+    """Public entry: audit pie. Header + diagram + copy instruction
+    + ELM AI Hub pointer."""
     body = format_audit_mermaid(audit_summary)
     if not body.strip().startswith("```"):
         return body
-    live_link = mermaid_live_url(body)
-    link_block = (
-        f"\n**[📊 Open / edit in Mermaid Live]({live_link})** "
-        f"— full editor, export PNG/SVG, share.\n"
-    ) if live_link else ""
     return ("## Module quality distribution\n\n"
-            + body
-            + link_block
+            + _wrap_with_copy_markers(body)
+            + _COPY_INSTRUCTION
             + "\n_For semantic scoring + rewrite suggestions, open "
               "in the Requirements Quality Assistant agent in IBM "
               "ELM AI Hub._\n")
