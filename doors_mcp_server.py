@@ -79,7 +79,7 @@ load_dotenv()
 # decide if a newer GitHub release exists; the `connect_to_elm`
 # response also surfaces it so users always know what version they're
 # running.
-__version__ = "0.13.3"
+__version__ = "0.14.0"
 GITHUB_REPO = "brettscharm/elm-mcp"
 
 app = Server("elm-mcp")
@@ -2226,13 +2226,22 @@ async def get_prompt(name: str, arguments: dict | None = None) -> list[PromptMes
             "   - Constraints/Risks/Assumptions → ask once, "
             "default skip\n"
             "   - Skipped (Business Goal, DoD, sprint metadata)\n\n"
-            "6. **🛑 MANDATORY INTERVIEW — ask MANY questions, "
-            "ONE AT A TIME.** A Jira ticket is SEED material, "
-            "not a spec. The author wrote for engineers with "
-            "shared context; you don't have that context, so "
-            "you have to re-elicit it. Run BOB.md's 'Generation "
-            "Discipline' / Step 3b 12-15 question areas + "
-            "these Jira-specific follow-ups:\n\n"
+            "6. **🛑 MANDATORY: Multi-Dimensional Coverage "
+            "Interview.** Run the process from BOB.md's "
+            "'🎯 Multi-Dimensional Coverage Interview' section "
+            "using the 18-dimension **Requirements** list. The "
+            "Jira ticket is SEED material — re-elicit the parts "
+            "the author assumed context for. Track ✅/🟡/⬜/🚫 in "
+            "chat as you go, show progress UI, catch "
+            "inconsistencies, surface a live draft preview after "
+            "dimension 4 with running lint scores. Stop when all "
+            "18 dimensions are ✅ or 🚫. Cap at 35 questions.\n\n"
+            "Open with the contract: *\"I'll cover 18 dimensions "
+            "of a complete requirements spec for this Jira "
+            "ticket. Some will be waived if they don't apply. "
+            "I'll show progress as we go; stop me anytime.\"*\n\n"
+            "**Jira-specific add-ons** (ask once for the whole "
+            "import, in addition to the 18 dimensions):\n\n"
             "   **Per-batch (asked once for the whole import):**\n"
             "   - *\"Who's the engineering owner for these reqs? "
             "(for the Owner attribute.)\"*\n"

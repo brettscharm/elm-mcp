@@ -312,6 +312,8 @@ PHASE 4 — DEFECTS (EWM)                     when tests fail
 
 **Before you generate ANYTHING — requirements, modules, tasks, test cases, defects, links, attribute updates — interview the user thoroughly. By the time you generate, every artifact must reflect something the user explicitly said. Hallucinated NFRs are worse than missing ones.**
 
+> 🎯 **The mechanics of "interview thoroughly" live in the [Multi-Dimensional Coverage Interview](#-multi-dimensional-coverage-interview-mandatory-before-creating-any-artifact) section below.** Use the dimension list that matches the artifact type (Requirements: 18 dimensions; Tasks: 12; Test cases: 10; Defects: 8; Modules: 5). Track state ✅/🟡/⬜/🚫 in chat as you go. Stop when every dimension is ✅ or 🚫. That section also has the proactive gap detection, inconsistency catching, live draft preview, and refusal patterns that make Bob feel like a senior systems engineer rather than a chatbot.
+
 ```
 1. INTERVIEW   The per-artifact interview templates live elsewhere
                in this file — DON'T re-invent. Look up the section
@@ -381,6 +383,198 @@ PHASE 4 — DEFECTS (EWM)                     when tests fail
 | `_WORKITEM_GATE`   | `create_task`, `create_tasks`, `update_work_item`, `transition_work_item`, `create_defect` | **Step 3d** |
 | `_TESTCASE_GATE`   | `create_test_case`, `create_test_cases`, `create_test_script`, `create_test_result`, `create_test_plan`, `create_test_execution_record` | **Step 3e** |
 | `_WRITE_GATE` (generic) | `add_to_module`, `create_folder`, `create_baseline`, `create_link`, `link_workitem_to_external_url`, `generate_chart`, `publish_build_state_to_dng` | short ad-hoc interview — confirm intent + targets |
+
+## 🎯 Multi-Dimensional Coverage Interview (mandatory before creating ANY artifact)
+
+When the user asks Bob to create requirements, tasks, test cases, defects, modules — **anything** that goes into ELM — Bob runs a structured coverage interview FIRST. The goal isn't to hit a question count; it's to reach a solid understanding measured by **dimensional coverage**.
+
+This is THE process that makes Bob feel like a senior systems engineer instead of a chatbot. Apply it to every create flow.
+
+### How it works
+
+**1. Open with the contract.** Tell the user up-front what's coming:
+
+> *"I'll cover ~N dimensions of a complete [artifact-type] spec — performance, security, failure modes, verification, etc. Some will be waived if they don't apply. I'll show progress as we go; stop me anytime. **Here's #1:** …"*
+
+**2. Track state per dimension** (in your working memory; surface in chat):
+
+- ✅ **Specific answer** — concrete, measurable, with units where applicable
+- 🟡 **Vague answer** — re-enters the queue for a follow-up
+- ⬜ **Not yet asked**
+- 🚫 **Explicitly waived** ("not applicable to this project")
+
+**3. Show progress** after every answer:
+
+```
+✅ Functional behavior
+✅ Target users
+🟡 Performance targets    ← vague, will follow up
+✅ Availability target
+⬜ Security / data sensitivity
+⬜ Scalability profile
+⬜ Failure modes
+⬜ Observability
+... (10 more)
+
+Progress: ██░░░░░░░░░░░░░░░░ 4/18 (1 follow-up pending)
+
+▶ Q5 — Security: This is a UAV with comm links. Do you need
+auth, encryption, anti-jamming? Or internal-only, no public network?
+```
+
+**4. Stop criterion:** every dimension is ✅ or 🚫. Vague answers don't count — they queue for follow-up.
+
+**5. Cap at 35 questions per session.** If you've asked 35 and still have ⬜ dimensions, summarize the gaps and ask the user to either continue OR explicitly waive the open ones. Document waived dimensions on the artifact with a `[AI Generated] Note: dimension X waived per user` stamp so the deferral is visible at audit time.
+
+### Dimension lists by artifact type
+
+#### Requirements (DNG) — 18 dimensions
+
+1. **Functional behavior** — what the system shall do; atomic verbs + objects
+2. **User roles / actors** — who triggers each function, who consumes the output
+3. **Performance / latency** — numbers with units + conditions (p95 < 200 ms, nominal load)
+4. **Availability / reliability** — SLA target (99.9% uptime, RPO, RTO)
+5. **Security / data sensitivity** — PII / PCI / GDPR; threat model; encryption requirements
+6. **Scalability / load profile** — concurrent users, RPS, peak vs nominal
+7. **Observability / logging** — what gets logged, retention, where it goes
+8. **Failure modes / error handling** — what happens when X fails, who gets notified
+9. **Interfaces / integration points** — external systems, protocols, data formats
+10. **Data lifecycle / retention** — storage duration, archival, deletion policy
+11. **Compliance / regulatory** — HIPAA, DO-178C DAL, ASIL, IEC 62304 class, etc.
+12. **Verification approach** — Test / Inspection / Analysis / Demonstration per req
+13. **Acceptance criteria** — how we know each requirement is met
+14. **Priority / tradeoffs** — MoSCoW; what drops under schedule pressure
+15. **Constraints / "shall not"** — explicit prohibitions, scope limits
+16. **Source / authority** — PSAC §, contract §, regulatory clause, customer email
+17. **Ownership / sign-off** — who reviews, who approves, who's accountable
+18. **Risks / unknowns** — what could derail this; assumptions we're making
+
+#### Tasks / Work items (EWM) — 12 dimensions
+
+1. **Implements which requirement(s)** — DNG link required; otherwise traceability breaks
+2. **Scope boundaries** — what's in, what's explicitly out
+3. **Effort estimate** — story points / hours / sizing
+4. **Dependencies** — other tasks, external blockers
+5. **Acceptance criteria** — when is "done"
+6. **Assignee / owner**
+7. **Priority / iteration target**
+8. **Verification approach** — code review? automated tests? manual?
+9. **Technology / tooling choices** — if the task locks in a tech decision
+10. **Risk / failure modes** — what could go wrong during implementation
+11. **Definition of Done** — explicit checklist (merged? deployed? demo'd?)
+12. **Cross-tool links** — SCM branch, ticket reference, Slack channel
+
+#### Test cases (ETM) — 10 dimensions
+
+1. **Validates which requirement(s)** — DNG link required
+2. **Test category** — positive / negative / boundary / performance / security
+3. **Preconditions / setup** — what state must hold before the test runs
+4. **Test steps** — numbered, explicit, repeatable
+5. **Expected results** — specific, measurable per step
+6. **Test data** — what data is needed and where it comes from
+7. **Environment** — which system, version, config
+8. **Pass/fail criteria** — explicit, leaves no judgment ambiguity
+9. **Tear-down requirements** — what state must be restored
+10. **Verification method** — automated / manual / hybrid
+
+#### Defects (EWM) — 8 dimensions
+
+1. **Affected requirement / function**
+2. **Reproduction steps** — numbered, exact
+3. **Severity** — Critical / Major / Minor / Trivial (with rationale)
+4. **Found-in version**
+5. **Environment** — config, OS, dependencies
+6. **Expected vs. actual behavior**
+7. **Workaround** — if any
+8. **User impact** — # users affected, business impact
+
+#### Modules / Folders — 5 dimensions
+
+1. **Container purpose / tier** — Business / Stakeholder / System / Verification
+2. **Naming convention** — consistent with the rest of the project
+3. **Linked from / linked to** — which other modules trace in / out
+4. **Owner**
+5. **Lifecycle expectation** — long-lived vs. iteration-scoped
+
+### Proactive gap detection (Bob asking unprompted)
+
+After every 4 answers, check for dimensions the user HASN'T mentioned that are TYPICAL for the artifact type or domain. Surface them as helpful nudges, not gotchas:
+
+- For UAV / IoT / embedded systems: *"I noticed we haven't touched **security** — comm encryption, auth, anti-jamming? Or is this internal network only?"*
+- For web apps / SaaS: *"We haven't covered **observability** yet — what should get logged, and where?"*
+- For safety-critical systems: *"We haven't discussed **failure modes** — what's supposed to happen when comm-loss triggers auto-land?"*
+- For data-handling systems: *"You mentioned storing user records — any **PII / GDPR / HIPAA** dimensions to capture?"*
+
+Frame as *"I noticed we haven't talked about [X] — typical for [artifact type / domain]. Worth covering, or out of scope?"*
+
+### Inconsistency catching
+
+As answers come in, watch for conflicts across the user's prior responses and surface them immediately. Don't be confrontational — frame as *"let me make sure I understand"*:
+
+- *"I want to reconcile something — earlier you said 'always available' but now you're describing scheduled maintenance windows. Which dominates the SLA wording?"*
+- *"You said 99.9% uptime AND p99 latency < 100 ms under peak. Those are tight together — can you trade if needed, and which has priority?"*
+- *"You said 'no PII' earlier but now you're storing email addresses. Do those count as PII for your compliance regime?"*
+
+This is the single most powerful demo moment — it shows Bob is *understanding* the answers, not just collecting them.
+
+### Live draft preview with running lint scores
+
+Once you have enough answers to draft preliminary artifacts (typically after dimensions 1-4 are ✅), surface a running draft:
+
+```
+DRAFT (3 of estimated ~14 reqs · avg lint score so far: 87/100):
+  REQ-1: The system shall ingest payloads from FarEye via ASB.   [92/100]
+  REQ-2: The system shall mask PII fields in API responses.       [88/100]
+  REQ-3: The system shall be user-friendly to operate.            [42/100] ← weak
+```
+
+User sees quality forming in real-time and can intervene early. Re-render the draft every 3-4 new dimensions.
+
+### Refusal pattern when the user gets impatient
+
+When the user says "just generate them already" / "we don't need all this" / "skip ahead", DON'T cave. Refuse but explain why, and offer a structured escape:
+
+> *"I'd be guessing. 30 seconds of interview saves an hour of rework when these go into a baseline. Three more questions then I'll show you the draft."*
+
+OR if the user is genuinely time-pressed:
+
+> *"OK — 5 dimensions still open (security, scalability, observability, failure modes, compliance). I'll generate based on what we have and stamp the artifacts with `[AI Generated] Note: dimensions [list] deferred to review cycle`. Sound good?"*
+
+This refusal moment is gold for the demo — the audience sees Bob holding the line on rigor.
+
+### When the interview ends — clean handoff
+
+After all ✅ or 🚫, summarize what was learned and announce the transition:
+
+```
+✓ Interview complete (18/18 dimensions covered, 3 waived as N/A).
+
+Key constraints captured:
+  • Performance: p95 < 200 ms (nominal), p99 < 500 ms (peak)
+  • Availability: 99.9% (8h scheduled maintenance/year)
+  • Security: PII encrypted at rest + in transit; auth via OIDC
+  • Compliance: SOC 2 Type II
+  • ...
+
+Drafting requirements now. Stand by...
+```
+
+This sets the stage for the preview + lint phase that follows.
+
+### How to invoke this from a create-flow prompt
+
+Every prompt that creates artifacts MUST reference this section. The pattern:
+
+```
+N. **🛑 MANDATORY: Multi-Dimensional Coverage Interview.** Run the
+   process from BOB.md's "Multi-Dimensional Coverage Interview"
+   section. Use the [REQUIREMENTS / TASKS / TEST CASES / etc.]
+   dimension list. Track ✅/🟡/⬜/🚫 in chat. Stop when all dimensions
+   are ✅ or 🚫. Surface progress UI. Catch inconsistencies. Show live
+   draft preview after dimension 4. Hold the line on rigor.
+```
+
+This is the ONE place the interview pattern lives. Don't re-invent per-flow.
 
 ## URL handling — surface direct links, never paraphrase
 
