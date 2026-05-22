@@ -34,7 +34,10 @@ Design choices:
 
 from __future__ import annotations
 
+import base64
+import json
 import re
+import zlib
 from typing import Any, Dict, List, Optional
 
 
@@ -49,6 +52,52 @@ _COLORS = {
     "test":    "fill:#e2e3e5,stroke:#6c757d,stroke-width:1px,color:#383d41",
     "orphan":  "fill:#f8d7da,stroke:#dc3545,stroke-width:2px,stroke-dasharray: 5 5,color:#721c24",
 }
+
+
+# ── mermaid.live one-click URL ─────────────────────────────
+#
+# Mermaid Live Editor accepts the entire diagram state in the URL
+# fragment as zlib-compressed base64 (the "pako:" prefix indicates
+# pako/zlib compression). The fragment is processed client-side in
+# the user's browser — the diagram contents NEVER hit any external
+# server's request log. That's important for enterprise data
+# residency: artifact URLs encoded in the click directives stay
+# private to the user's browser.
+#
+# We deliberately do NOT use mermaid.ink — that service receives the
+# raw diagram on its servers to render PNG/SVG, which some enterprise
+# customers can't allow. Mermaid Live is fragment-only → safe.
+
+
+def mermaid_live_url(diagram_code: str, *, edit: bool = True) -> str:
+    """Return a clickable mermaid.live URL with the diagram preloaded.
+
+    Strips the ```mermaid``` code fence if present (the URL state
+    expects the bare diagram source). Compresses with zlib and
+    encodes as URL-safe base64 — Mermaid Live's "pako" format.
+    """
+    if not diagram_code:
+        return ""
+    # Strip leading/trailing ```mermaid``` fences if present
+    src = diagram_code.strip()
+    if src.startswith("```"):
+        # Drop the opening fence line
+        src = src.split("\n", 1)[1] if "\n" in src else ""
+    if src.endswith("```"):
+        src = src.rsplit("```", 1)[0]
+    src = src.rstrip()
+
+    state = {
+        "code": src,
+        "mermaid": json.dumps({"theme": "default"}),
+        "autoSync": True,
+        "updateDiagram": True,
+    }
+    payload = json.dumps(state, separators=(",", ":")).encode("utf-8")
+    compressed = zlib.compress(payload, 9)
+    b64 = base64.urlsafe_b64encode(compressed).decode("ascii").rstrip("=")
+    base = "https://mermaid.live/edit" if edit else "https://mermaid.live/view"
+    return f"{base}#pako:{b64}"
 
 
 # ── ID / Label Sanitizers ──────────────────────────────────
@@ -374,7 +423,8 @@ def format_audit_mermaid(audit_summary: Dict[str, Any]) -> str:
 
 def render_trace_block(items: List[Dict[str, Any]], **kwargs) -> str:
     """Public entry: trace flowchart. Adds a tiny markdown header
-    explaining the click behavior, then the diagram block."""
+    explaining the click behavior, then the diagram block, then a
+    one-click Mermaid Live link for editing / exporting."""
     body = format_trace_mermaid(items, **kwargs)
     if not body.strip().startswith("```"):
         return body  # already an empty-state message
@@ -384,22 +434,35 @@ def render_trace_block(items: List[Dict[str, Any]], **kwargs) -> str:
         "mermaid.live — opens the artifact in DNG / EWM / ETM. "
         "Hover for status + owner._\n\n"
     )
+    live_link = mermaid_live_url(body)
+    link_block = (
+        f"\n**[📊 Open / edit in Mermaid Live]({live_link})** "
+        f"— full editor, export PNG/SVG, share. The diagram is "
+        f"encoded in the URL fragment (client-side only — never hits "
+        f"any server).\n"
+    ) if live_link else ""
     footer = (
         "\n_For AI-augmented diagrams (semantic link suggestions, "
         "change-impact heatmaps) point users at IBM ELM AI Hub. "
         "The map above is the deterministic floor._\n"
     )
-    return header + body + footer
+    return header + body + link_block + footer
 
 
 def render_audit_block(audit_summary: Dict[str, Any]) -> str:
-    """Public entry: audit pie. Adds a tiny markdown header then the
-    diagram block."""
+    """Public entry: audit pie. Adds a tiny markdown header, then the
+    diagram block, then a Mermaid Live edit link."""
     body = format_audit_mermaid(audit_summary)
     if not body.strip().startswith("```"):
         return body
+    live_link = mermaid_live_url(body)
+    link_block = (
+        f"\n**[📊 Open / edit in Mermaid Live]({live_link})** "
+        f"— full editor, export PNG/SVG, share.\n"
+    ) if live_link else ""
     return ("## Module quality distribution\n\n"
             + body
+            + link_block
             + "\n_For semantic scoring + rewrite suggestions, open "
               "in the Requirements Quality Assistant agent in IBM "
               "ELM AI Hub._\n")
