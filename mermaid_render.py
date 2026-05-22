@@ -445,20 +445,31 @@ def _strip_fence(mermaid_block: str) -> str:
 
 def _emit_dual_blocks(mermaid_block: str) -> str:
     """Emit the diagram TWICE:
-      1. Inside a ```mermaid``` fence → inline render in Bob, Claude,
-         GitHub, etc.
-      2. As bare source between ✂️ START COPY / END COPY markers →
-         pure copy region, no fence delimiters that confuse Mermaid
-         Live's diagram-type detector.
+      1. Inside a ```mermaid``` fence → renders inline in Bob,
+         Claude, GitHub, etc.
+      2. Inside a PLAIN ``` fence (no language tag) between ✂️
+         START COPY / END COPY markers → has a copy button (the
+         chat UI shows one for any fenced code block) BUT doesn't
+         get rendered by Mermaid (no language tag). When the user
+         clicks the copy button, the chat UI copies only the inner
+         text (the bare diagram source) — NOT the fence delimiters.
+         That bare text pastes cleanly into mermaid.live.
+
+    The user copies from the bottom block → gets clean source →
+    Mermaid Live parses it correctly. The top block stays as the
+    inline visual reference.
     """
     bare = _strip_fence(mermaid_block)
     return (
         mermaid_block.rstrip() + "\n\n"
-        + "_— For copying into mermaid.live, use the block below "
-        "(NOT the rendered one above). The block above includes a "
-        "code-fence delimiter that the Mermaid parser would reject._\n\n"
-        + "✂️ START COPY (for mermaid.live) ─────────────────\n"
-        + bare + "\n"
+        + "_— The block above is for inline rendering only. "
+        "To copy/paste into mermaid.live, use the block BELOW "
+        "(click its copy button, or select between the ✂️ "
+        "markers). Do NOT copy the rendered block above — its "
+        "```mermaid``` fence line will be rejected by Mermaid "
+        "Live's parser._\n\n"
+        + "✂️ START COPY (for mermaid.live) ─────────────────\n\n"
+        + "```\n" + bare + "\n```\n\n"
         + "✂️ END COPY ──────────────────────────────────────\n"
     )
 
