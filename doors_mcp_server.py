@@ -79,7 +79,7 @@ load_dotenv()
 # decide if a newer GitHub release exists; the `connect_to_elm`
 # response also surfaces it so users always know what version they're
 # running.
-__version__ = "0.12.7"
+__version__ = "0.13.0"
 GITHUB_REPO = "brettscharm/elm-mcp"
 
 app = Server("elm-mcp")
@@ -2169,15 +2169,15 @@ async def get_prompt(name: str, arguments: dict | None = None) -> list[PromptMes
 
         intro = (
             "🛑 **HARD RULES — READ BOTH BEFORE YOU DO ANYTHING:**\n\n"
-            "**(1) EXACTLY ONE Mermaid block per response** — the "
-            "output of `format_audit_mermaid` (verbatim). DO NOT "
+            "**(1) DO NOT emit any diagrams inline in chat — only the HTML report path** — the "
+            "output of `generate_audit_report` (verbatim). DO NOT "
             "add 'supplementary' bar charts, risk-distribution "
             "pies, or other improvised Mermaid. ONE quality pie. "
             "Done.\n\n"
-            "**(2) NEVER hand-roll Mermaid syntax.** If you type "
+            "**(2) NEVER emit Mermaid, ASCII art, or improvised diagrams inline in chat.** If you type "
             "`pie`, `pie title`, `flowchart`, `graph`, or any "
             "Mermaid keyword directly into your response, STOP and "
-            "call `format_audit_mermaid`. Hand-rolling loses the "
+            "call `generate_audit_report`. Hand-rolling loses the "
             "copy block, the RQA pointer footer, and consistent "
             "styling.\n\n"
             "The user wants a quality audit of a DNG module. Run "
@@ -2228,7 +2228,7 @@ async def get_prompt(name: str, arguments: dict | None = None) -> list[PromptMes
             "rules, and a status block (Approved % and owner gaps).\n"
             "3. **Surface the audit verbatim** to the user. Don't "
             "paraphrase — the rule citations are valuable.\n"
-            "4. **🛑 MANDATORY: call `format_audit_mermaid` with the "
+            "4. **🛑 MANDATORY: call `generate_audit_report` with the "
             "audit's bucket counts** to emit a quality-distribution "
             "pie chart. Pass `audit_summary={good: <n>, fair: <n>, "
             "weak: <n>, poor: <n>}` extracted from the audit's "
@@ -2256,7 +2256,7 @@ async def get_prompt(name: str, arguments: dict | None = None) -> list[PromptMes
         antipatterns = (
             "## Anti-patterns\n\n"
             "- ❌ **Hand-rolling Mermaid output.** ALWAYS call "
-            "`format_audit_mermaid` for the quality pie chart. "
+            "`generate_audit_report` for the quality pie chart. "
             "You lose the Mermaid Live edit link and consistent "
             "styling if you hand-roll.\n"
             "- ❌ Don't push fixes during an audit. Audits are "
@@ -2283,16 +2283,16 @@ async def get_prompt(name: str, arguments: dict | None = None) -> list[PromptMes
         parts = []
         parts.append(
             "🛑 **HARD RULES — READ ALL THREE BEFORE YOU DO ANYTHING:**\n\n"
-            "**(1) EXACTLY ONE Mermaid block per response.** That "
-            "block is the output of `format_trace_mermaid` (verbatim). "
+            "**(1) DO NOT emit any diagrams inline in chat — only the HTML report path.** That "
+            "block is the output of `generate_trace_report` (verbatim). "
             "DO NOT add 'supplementary' pie charts, gap-analysis "
             "flowcharts, risk-distribution charts, category "
             "breakdowns, or any other Mermaid block. If you think "
             "'a pie chart would also be nice' or 'let me visualize "
             "the risk levels too' — STOP. ONE diagram. If the user "
             "later explicitly asks for a quality pie chart, call "
-            "`format_audit_mermaid` for THAT (never hand-roll).\n\n"
-            "**(2) NEVER hand-roll Mermaid syntax.** If you type "
+            "`generate_audit_report` for THAT (never hand-roll).\n\n"
+            "**(2) NEVER emit Mermaid, ASCII art, or improvised diagrams inline in chat.** If you type "
             "`flowchart`, `graph TB`, `graph LR`, `pie`, `gantt`, "
             "`sequenceDiagram`, or any Mermaid diagram-type keyword "
             "directly in your response, STOP — call the right tool. "
@@ -2362,7 +2362,7 @@ async def get_prompt(name: str, arguments: dict | None = None) -> list[PromptMes
             "6. **Orphan tasks/tests (if user asked)** — query EWM "
             "for tasks where `implementsRequirement` is empty; same "
             "for ETM tests with no req link. List as markdown.\n\n"
-            "7. **🛑 MANDATORY: call `format_trace_mermaid` with the "
+            "7. **🛑 MANDATORY: call `generate_trace_report` with the "
             "assembled trace data.** Do NOT hand-roll a Mermaid "
             "diagram yourself. The tool emits the correct Mermaid "
             "block (with click directives that open each artifact "
@@ -2381,7 +2381,7 @@ async def get_prompt(name: str, arguments: dict | None = None) -> list[PromptMes
             "task, `/create-test-cases` for a missing test.\n\n"
             "## Anti-patterns\n\n"
             "- ❌ **Hand-rolling Mermaid syntax.** ALWAYS call "
-            "`format_trace_mermaid`. It produces clickable nodes "
+            "`generate_trace_report`. It produces clickable nodes "
             "(opens artifacts in DNG/EWM/ETM), the right color "
             "palette, the Mermaid Live edit link, and the RQA "
             "pointer. If you hand-roll, you lose all of that.\n"
@@ -4814,22 +4814,23 @@ async def list_tools() -> list[Tool]:
             }
         ),
         Tool(
-            name="format_trace_mermaid",
+            name="generate_trace_report",
             description=(
-                "ALWAYS USE THIS — do not hand-roll Mermaid trace "
-                "diagrams. Renders a Mermaid flowchart of the DNG "
-                "-> EWM -> ETM trace graph with: (1) correct color "
-                "palette (green = req with task AND test; yellow = "
-                "partial; red = orphan); (2) click directives so "
-                "every node opens the artifact in DNG/EWM/ETM; "
-                "(3) a one-click Mermaid Live edit link for "
-                "browser export to PNG/SVG; (4) the ELM AI Hub "
-                "Requirements Quality Assistant pointer footer. "
-                "Call this whenever a user asks for a trace "
-                "diagram, gap visualization, or whenever "
-                "/trace-gaps assembles per-req trace data. "
-                "Surface the output verbatim — don't paraphrase "
-                "the diagram source."
+                "ALWAYS USE THIS for trace / gap visualizations — "
+                "do not hand-roll diagrams or generate inline "
+                "diagrams in the chat. Writes a self-contained "
+                "polished HTML report (Inter typography, "
+                "interactive Cytoscape trace graph, Chart.js "
+                "coverage pie, gap detail tables) to "
+                "~/.elm-mcp/reports/. Returns the file path. The "
+                "user double-clicks the file to open in any "
+                "browser — every node in the graph is clickable "
+                "and opens the corresponding DNG / EWM / ETM "
+                "artifact in a new tab. ~1.5 MB self-contained, "
+                "air-gap safe, looks identical every time. "
+                "Use this whenever the user asks for a trace "
+                "diagram, gap visualization, or after /trace-gaps "
+                "assembles per-req trace data."
             ),
             inputSchema={
                 "type": "object",
@@ -4839,36 +4840,36 @@ async def list_tools() -> list[Tool]:
                         "description": "Per-req trace data. Each item: req_key, req_title, req_url, req_status, req_owner, tasks (array of {key, title, url, status}), tests (array of {key, title, url, status}).",
                         "items": {"type": "object"}
                     },
-                    "title": {"type": "string", "description": "Optional diagram title."},
-                    "max_nodes": {"type": "integer", "description": "Cap on req nodes shown. Default 50.", "default": 50},
-                    "show_only_gaps": {"type": "boolean", "description": "If true, hide fully-covered reqs."}
+                    "project": {"type": "string", "description": "DNG project name (for the report header)."},
+                    "module": {"type": "string", "description": "DNG module name (for the report header)."},
                 },
                 "required": ["items"]
             }
         ),
         Tool(
-            name="format_audit_mermaid",
+            name="generate_audit_report",
             description=(
-                "ALWAYS USE THIS — do not hand-roll Mermaid pie "
-                "charts. Renders a Mermaid pie chart of module "
-                "quality distribution (good >=85 / fair 65-84 / "
-                "weak 40-64 / poor <40) with a one-click Mermaid "
-                "Live edit link and the ELM AI Hub Requirements "
-                "Quality Assistant pointer. Call this after "
-                "audit_module to give a director-friendly at-a-"
-                "glance view. Pass either {good, fair, weak, poor} "
-                "integer counts OR {results: [...]} from "
-                "audit_module output. Surface verbatim."
+                "ALWAYS USE THIS for module quality / audit "
+                "visualizations. Writes a self-contained HTML "
+                "audit report to ~/.elm-mcp/reports/: stat cards, "
+                "quality distribution doughnut chart, lowest-"
+                "scoring requirements table (each clickable to "
+                "DNG), most-violated INCOSE/IEEE rules table, "
+                "pointer to Requirements Quality Assistant in "
+                "ELM AI Hub. Returns the file path. Same modern "
+                "styling, air-gap safe, identical every time."
             ),
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "audit_summary": {
+                    "audit": {
                         "type": "object",
-                        "description": "Either {good, fair, weak, poor} OR {results: [...]} from audit_module.",
-                    }
+                        "description": "Audit summary. Expected keys: good, fair, weak, poor (bucket counts), total, avg_score, approved_pct, worst (list of {title, url, score, bucket}), rule_counts (dict of rule -> count). Extract from audit_module output.",
+                    },
+                    "project": {"type": "string", "description": "DNG project name."},
+                    "module": {"type": "string", "description": "DNG module name."},
                 },
-                "required": ["audit_summary"]
+                "required": ["audit"]
             }
         ),
         # ── EWM: defect creation ───────────────────────────────
@@ -9156,9 +9157,7 @@ async def _dispatch_tool(name: str, arguments: Any) -> list[TextContent]:
         # ── Requirements Quality (deterministic lint + audit) ─
         elif name in ("lint_requirement_text",
                        "lint_requirements_batch",
-                       "coach_requirement",
-                       "format_trace_mermaid",
-                       "format_audit_mermaid"):
+                       "coach_requirement"):
             try:
                 from req_quality import (lint_and_score, batch_lint,
                                           audit_summary, format_findings,
@@ -9252,39 +9251,90 @@ async def _dispatch_tool(name: str, arguments: Any) -> list[TextContent]:
                 ]
                 return [TextContent(type="text", text="\n".join(lines))]
 
-            if name == "format_trace_mermaid":
-                try:
-                    from mermaid_render import render_trace_block
-                except Exception as e:
-                    return [TextContent(type="text",
-                                         text=f"Failed to load mermaid_render: {e}")]
-                items = arguments.get("items", []) or []
-                title = arguments.get("title", "") or ""
-                max_nodes = arguments.get("max_nodes", 50)
-                show_only_gaps = arguments.get("show_only_gaps")
-                try:
-                    block = render_trace_block(
-                        items, title=title, max_nodes=max_nodes,
-                        show_only_gaps=show_only_gaps,
-                    )
-                except Exception as e:
-                    return [TextContent(type="text",
-                                         text=f"format_trace_mermaid failed: {e}")]
-                return [TextContent(type="text", text=block)]
+        elif name in ("generate_trace_report", "generate_audit_report"):
+            try:
+                from html_report import (render_trace_report,
+                                          render_audit_report, write_report)
+            except Exception as e:
+                return [TextContent(type="text",
+                                     text=f"Failed to load html_report: {e}")]
 
-            if name == "format_audit_mermaid":
+            if name == "generate_trace_report":
+                items = arguments.get("items", []) or []
+                project = (arguments.get("project") or "").strip()
+                module = (arguments.get("module") or "").strip()
+                if not items:
+                    return [TextContent(type="text", text=(
+                        "Error: items array is required — assemble per-req "
+                        "trace data first (req_key, req_title, req_url, "
+                        "tasks=[...], tests=[...])."
+                    ))]
                 try:
-                    from mermaid_render import render_audit_block
+                    html = render_trace_report(
+                        items, project=project, module=module,
+                        version=__version__,
+                    )
+                    path = write_report(html, kind="trace",
+                                         project=project, module=module)
                 except Exception as e:
                     return [TextContent(type="text",
-                                         text=f"Failed to load mermaid_render: {e}")]
-                audit_summary = arguments.get("audit_summary", {}) or {}
+                                         text=f"generate_trace_report failed: {e}")]
+                size_mb = path.stat().st_size / (1024 * 1024)
+                return [TextContent(type="text", text=(
+                    f"✓ Traceability report generated.\n\n"
+                    f"**File:** `{path}`\n"
+                    f"**Size:** {size_mb:.2f} MB (self-contained, "
+                    f"air-gap safe)\n\n"
+                    f"**Open it:** `open '{path}'` (macOS) — or "
+                    f"double-click the file.\n\n"
+                    f"The report includes: coverage stats, an "
+                    f"interactive trace graph where every node is "
+                    f"clickable (opens DNG / EWM / ETM in a new tab), "
+                    f"a coverage distribution doughnut, and a gap "
+                    f"detail table. Same modern visual style every "
+                    f"time — share by emailing the file, dropping "
+                    f"into Confluence, or attaching to a review.\n\n"
+                    f"_For AI-powered semantic scoring on the same "
+                    f"requirements, open them in the **Requirements "
+                    f"Quality Assistant** agent in IBM ELM AI Hub. "
+                    f"This report is the deterministic floor._"
+                ))]
+
+            if name == "generate_audit_report":
+                audit = arguments.get("audit", {}) or {}
+                project = (arguments.get("project") or "").strip()
+                module = (arguments.get("module") or "").strip()
+                if not audit:
+                    return [TextContent(type="text", text=(
+                        "Error: audit summary is required — pass the "
+                        "audit_module output's bucket counts + worst "
+                        "list + rule_counts."
+                    ))]
                 try:
-                    block = render_audit_block(audit_summary)
+                    html = render_audit_report(
+                        audit, project=project, module=module,
+                        version=__version__,
+                    )
+                    path = write_report(html, kind="audit",
+                                         project=project, module=module)
                 except Exception as e:
                     return [TextContent(type="text",
-                                         text=f"format_audit_mermaid failed: {e}")]
-                return [TextContent(type="text", text=block)]
+                                         text=f"generate_audit_report failed: {e}")]
+                size_mb = path.stat().st_size / (1024 * 1024)
+                return [TextContent(type="text", text=(
+                    f"✓ Quality audit report generated.\n\n"
+                    f"**File:** `{path}`\n"
+                    f"**Size:** {size_mb:.2f} MB\n\n"
+                    f"**Open it:** `open '{path}'` (macOS) — or "
+                    f"double-click.\n\n"
+                    f"Includes stat cards, quality-distribution "
+                    f"doughnut, lowest-scoring requirements (each "
+                    f"clickable to DNG), and most-violated INCOSE/IEEE "
+                    f"rules.\n\n"
+                    f"_Open these same requirements in the **Requirements "
+                    f"Quality Assistant** agent in IBM ELM AI Hub for "
+                    f"AI-powered rewrite suggestions and semantic scoring._"
+                ))]
 
         elif name == "audit_module":
             try:
