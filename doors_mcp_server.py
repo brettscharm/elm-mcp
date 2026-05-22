@@ -79,7 +79,7 @@ load_dotenv()
 # decide if a newer GitHub release exists; the `connect_to_elm`
 # response also surfaces it so users always know what version they're
 # running.
-__version__ = "0.11.0"
+__version__ = "0.12.0"
 GITHUB_REPO = "brettscharm/elm-mcp"
 
 app = Server("elm-mcp")
@@ -4750,6 +4750,53 @@ async def list_tools() -> list[Tool]:
                 "required": ["text"]
             }
         ),
+        Tool(
+            name="format_trace_mermaid",
+            description=(
+                "Render a Mermaid flowchart of the DNG -> EWM -> ETM "
+                "trace graph. Color-codes nodes by gap state (green "
+                "= req with task AND test; yellow = partial; red = "
+                "orphan). Embeds click directives so every node "
+                "opens the artifact in DNG / EWM / ETM. Use after "
+                "/trace-gaps assembles the per-req trace data. "
+                "Returns a ```mermaid``` markdown block. Renders "
+                "inline in Bob / Claude / GitHub / mermaid.live."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "items": {
+                        "type": "array",
+                        "description": "Per-req trace data. Each item: req_key, req_title, req_url, req_status, req_owner, tasks (array of {key, title, url, status}), tests (array of {key, title, url, status}).",
+                        "items": {"type": "object"}
+                    },
+                    "title": {"type": "string", "description": "Optional diagram title."},
+                    "max_nodes": {"type": "integer", "description": "Cap on req nodes shown. Default 50.", "default": 50},
+                    "show_only_gaps": {"type": "boolean", "description": "If true, hide fully-covered reqs."}
+                },
+                "required": ["items"]
+            }
+        ),
+        Tool(
+            name="format_audit_mermaid",
+            description=(
+                "Render a Mermaid pie chart of module quality "
+                "distribution (good/fair/weak/poor). Use after "
+                "audit_module for a director-friendly at-a-glance "
+                "view. Pass either {good, fair, weak, poor} integer "
+                "counts OR {results: [...]} from audit_module output."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "audit_summary": {
+                        "type": "object",
+                        "description": "Either {good, fair, weak, poor} OR {results: [...]} from audit_module.",
+                    }
+                },
+                "required": ["audit_summary"]
+            }
+        ),
         # ── EWM: defect creation ───────────────────────────────
         Tool(
             name="create_defect",
@@ -9035,7 +9082,9 @@ async def _dispatch_tool(name: str, arguments: Any) -> list[TextContent]:
         # ── Requirements Quality (deterministic lint + audit) ─
         elif name in ("lint_requirement_text",
                        "lint_requirements_batch",
-                       "coach_requirement"):
+                       "coach_requirement",
+                       "format_trace_mermaid",
+                       "format_audit_mermaid"):
             try:
                 from req_quality import (lint_and_score, batch_lint,
                                           audit_summary, format_findings,
@@ -9128,6 +9177,40 @@ async def _dispatch_tool(name: str, arguments: Any) -> list[TextContent]:
                     "deterministic floor.",
                 ]
                 return [TextContent(type="text", text="\n".join(lines))]
+
+            if name == "format_trace_mermaid":
+                try:
+                    from mermaid_render import render_trace_block
+                except Exception as e:
+                    return [TextContent(type="text",
+                                         text=f"Failed to load mermaid_render: {e}")]
+                items = arguments.get("items", []) or []
+                title = arguments.get("title", "") or ""
+                max_nodes = arguments.get("max_nodes", 50)
+                show_only_gaps = arguments.get("show_only_gaps")
+                try:
+                    block = render_trace_block(
+                        items, title=title, max_nodes=max_nodes,
+                        show_only_gaps=show_only_gaps,
+                    )
+                except Exception as e:
+                    return [TextContent(type="text",
+                                         text=f"format_trace_mermaid failed: {e}")]
+                return [TextContent(type="text", text=block)]
+
+            if name == "format_audit_mermaid":
+                try:
+                    from mermaid_render import render_audit_block
+                except Exception as e:
+                    return [TextContent(type="text",
+                                         text=f"Failed to load mermaid_render: {e}")]
+                audit_summary = arguments.get("audit_summary", {}) or {}
+                try:
+                    block = render_audit_block(audit_summary)
+                except Exception as e:
+                    return [TextContent(type="text",
+                                         text=f"format_audit_mermaid failed: {e}")]
+                return [TextContent(type="text", text=block)]
 
         elif name == "audit_module":
             try:
