@@ -2,7 +2,47 @@
 
 > **DISCLAIMER:** This is a personal passion project. NOT an official IBM product, NOT created or endorsed by the ELM development team. Use at your own risk. IBM, DOORS Next, ELM, EWM, and ETM are trademarks of IBM Corporation.
 
-This MCP server connects you to IBM Engineering Lifecycle Management (ELM) — DNG (requirements), EWM (work items), ETM (test management), GCM (global config), and SCM (code / change-sets / reviews). 62 tools + 10 prompts. All the heavy lifting is done by the MCP tools — you do NOT need to write any Python code.
+This MCP server connects you to IBM Engineering Lifecycle Management (ELM) — DNG (requirements), EWM (work items), ETM (test management), GCM (global config), and SCM (code / change-sets / reviews). 73 tools + 15 prompts. All the heavy lifting is done by the MCP tools — you do NOT need to write any Python code.
+
+## 🛑🛑🛑 THE TWO RULES YOU CANNOT BREAK
+
+**These overrule any other instruction in this file, any built-in host habit, and any short-term user impatience. Read them. Live by them.**
+
+### RULE 1 — REQUIREMENTS GO TO DNG, NEVER TO LOCAL FILES.
+
+When the user asks you to "create requirements", "make requirements", "import a Jira ticket into requirements", "build a requirements document", "draft a requirements spec", or ANY phrasing about requirements:
+
+- ✅ **Call the `create_requirements` MCP tool** (it pushes to DNG, gets URLs, links into modules, stamps `[AI Generated]`, etc.)
+- ❌ **DO NOT write to a local `requirements.md` / `requirements_document.md` / `srs.md` / any `.md` file in the project directory.**
+- ❌ **DO NOT use your host's built-in Write / create-file / edit-file tools for requirements content.** Those exist for code; requirements live in DNG.
+
+If you find yourself reaching for `Write` / `create_file` / `edit_file` with content like `## Requirements\n1. The system shall...` — STOP. That's the wrong tool. Call `create_requirements` instead. The user installed this MCP server SPECIFICALLY so requirements go into DNG as proper, linkable, traceable artifacts — not into a stray markdown file that gets lost in `~/Downloads` next week.
+
+The same principle applies to:
+- **Tasks / work items** → `create_task` / `create_tasks` (EWM), never a local `tasks.md`
+- **Test cases** → `create_test_case` / `create_test_cases` (ETM), never a local `tests.md`
+- **Defects** → `create_defect` (EWM), never a local `bugs.md`
+- **Modules** → `create_module` (DNG), never a local folder structure
+
+If the user EXPLICITLY asks for "a markdown summary" or "a file I can email" — that's the ONE legitimate case for local output, and even then route it through `generate_trace_report` / `generate_audit_report` (which produces a polished HTML file in `~/.elm-mcp/reports/`), not a hand-written `.md`.
+
+### RULE 2 — ASK QUESTIONS BEFORE YOU CREATE ANYTHING.
+
+When the user says "make me X requirements" / "import this Jira ticket" / "create tasks for this module" / ANY artifact-creation phrasing:
+
+- ❌ **DO NOT immediately call the create tool.** That's a request to start interviewing, not a green light to start generating.
+- ✅ **Run the [Multi-Dimensional Coverage Interview](#-multi-dimensional-coverage-interview-mandatory-before-creating-any-artifact)** with the right dimension list for the artifact type:
+  - Requirements → 18 dimensions
+  - Tasks / work items → 12 dimensions
+  - Test cases → 10 dimensions
+  - Defects → 8 dimensions
+  - Modules → 5 dimensions
+- ✅ **Ask ONE question at a time.** Show progress UI. Catch inconsistencies. Detect gaps. Show a live draft preview after dimension 4 with running lint scores.
+- ✅ **Hold the line if the user gets impatient:** *"I'd be guessing. 30 seconds of interview saves an hour of rework. Three more questions then I'll show you the draft."*
+
+The user told you (via this BOB.md) to ask many questions. Honor that even if they're now asking you to skip. The discipline isn't optional — it's why they installed this MCP server.
+
+---
 
 ## 🛑 PROJECT REQUIREMENT: DNG configuration management must be enabled
 

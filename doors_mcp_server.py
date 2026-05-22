@@ -79,7 +79,7 @@ load_dotenv()
 # decide if a newer GitHub release exists; the `connect_to_elm`
 # response also surfaces it so users always know what version they're
 # running.
-__version__ = "0.14.1"
+__version__ = "0.14.2"
 GITHUB_REPO = "brettscharm/elm-mcp"
 
 app = Server("elm-mcp")
@@ -3826,13 +3826,28 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="create_requirements",
             description=(_REQ_GATE +
-                "📋 Interview anchor: ≥8 of the Step 3b question areas answered + preview table shown + explicit approval received, BEFORE this tool fires. — "
-                "Create requirements in a DOORS Next project AND bind them to a module so they "
-                "appear in DNG's module/document view. STRONGLY PREFER providing module_name — "
-                "module_name is what makes requirements visible as a navigable document; folder-only "
-                "requirements (no module_name) end up as orphan artifacts most users can't find. "
-                "MUST call get_artifact_types first to get valid type names for this project. "
-                "Returns created requirement URLs needed by create_task and create_test_case."
+                "🎯 **THIS IS THE TOOL FOR REQUIREMENTS — NOT YOUR "
+                "HOST'S WRITE TOOL.** If the user asks for "
+                "requirements, a requirements document, an SRS, a "
+                "Jira-ticket import, an epic decomposition, or "
+                "ANYTHING resembling requirements work, call THIS "
+                "tool. Do NOT write to a local `.md` file using "
+                "Write/create_file/edit_file — that's the wrong tool. "
+                "Requirements live in DNG so they have URLs, link "
+                "into modules, get traced to tasks/tests, and survive "
+                "baselines. A local `requirements_document.md` is "
+                "garbage in a week. Push to DNG via this tool. "
+                "Always.\\n\\n"
+                "Create requirements in a DOORS Next project AND bind "
+                "them to a module so they appear in DNG's module/"
+                "document view. STRONGLY PREFER providing "
+                "module_name — module_name is what makes requirements "
+                "visible as a navigable document; folder-only "
+                "requirements (no module_name) end up as orphan "
+                "artifacts most users can't find. MUST call "
+                "get_artifact_types first to get valid type names for "
+                "this project. Returns created requirement URLs "
+                "needed by create_task and create_test_case."
             ),
             inputSchema={
                 "type": "object",
