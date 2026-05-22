@@ -25,7 +25,7 @@ live navigation map of the project.
 Design choices:
   - Node IDs are sanitized (alphanumeric + underscore only) for
     cross-renderer compatibility.
-  - Labels use <br/> for line breaks (key on line 1, title on line 2).
+  - Labels use <br> for line breaks (key on line 1, title on line 2).
   - Click directives include tooltip with status/owner so hovering
     shows enrichment without cluttering the label.
   - Diagrams cap at MAX_NODES (50 default); above that, only gaps
@@ -70,19 +70,56 @@ def _safe_id(s: str) -> str:
     return out[:80]  # cap absurd lengths
 
 
+# Common engineering Unicode → ASCII replacements. Mermaid's strict
+# parser can choke on these in quoted strings depending on renderer
+# version; replacing makes the output portable across mermaid.live,
+# Bob's inline renderer, GitHub, and Confluence's Mermaid macro.
+_UNICODE_REPLACEMENTS = {
+    "≥": ">=",   # ≥
+    "≤": "<=",   # ≤
+    "≠": "!=",   # ≠
+    "±": "+/-",  # ±
+    "°": " deg", # °
+    "µ": "u",    # µ
+    "μ": "u",    # μ
+    "→": "->",   # →
+    "←": "<-",   # ←
+    "·": " - ",  # · (middle dot)
+    "•": " - ",  # • (bullet)
+    "—": " - ",  # — (em dash)
+    "–": "-",    # – (en dash)
+    "‘": "'",    # ‘
+    "’": "'",    # ’
+    "“": '"',    # “
+    "”": '"',    # ”
+}
+
+
+def _ascii_safe(s: str) -> str:
+    """Replace engineering / typographic Unicode with ASCII equivalents
+    so Mermaid's strict parser doesn't reject the label."""
+    if not s:
+        return ""
+    for u, a in _UNICODE_REPLACEMENTS.items():
+        if u in s:
+            s = s.replace(u, a)
+    return s
+
+
 def _escape_label(s: str) -> str:
     """Make a string safe inside a Mermaid node label [...].
-    Mermaid is finicky about quotes and brackets in labels; safest
-    is to strip them or replace with safe equivalents.
+    Mermaid is finicky about quotes, brackets, and non-ASCII inside
+    labels; strip / replace anything that can confuse the parser.
     """
     if not s:
         return ""
+    s = _ascii_safe(s)
     s = (s.replace('"', "'")
           .replace("[", "(")
           .replace("]", ")")
           .replace("{", "(")
           .replace("}", ")")
-          .replace("|", "/")
+          .replace("|", " - ")  # pipe is Mermaid edge-label delimiter
           .replace("\n", " ")
           .replace("\r", " "))
     if len(s) > 60:
@@ -92,30 +129,47 @@ def _escape_label(s: str) -> str:
 
 def _escape_tooltip(s: str) -> str:
     """Escape a string for use inside Mermaid click directive tooltip
-    (which is double-quoted)."""
+    (which is double-quoted). Pipe and Unicode here also break strict
+    Mermaid renderers."""
     if not s:
         return ""
-    return s.replace('"', "'").replace("\n", " ")[:200]
+    s = _ascii_safe(s)
+    s = (s.replace('"', "'")
+          .replace("|", " - ")
+          .replace("\n", " "))
+    return s[:200]
+
+
+# OSLC URLs often end in opaque artifact UUIDs (e.g. `_sOhoEe-nEeua66qs5pmvWA`).
+# Those are valid IDs but unreadable as labels. Detect the shape and
+# fall back to a short generated key instead.
+_OSLC_UUID = re.compile(r"^_?[A-Za-z0-9]{6,}-[A-Za-z0-9]{8,}$")
+
+# Per-call counter for opaque-ID fallback (per process scope, ephemeral)
+_fallback_counter: Dict[str, int] = {}
 
 
 def _short_key(art: Dict[str, Any], fallback_prefix: str = "ART") -> str:
     """Try to surface a short, human-friendly key for an artifact.
-    Looks at common ELM fields (key, id, identifier) and falls back to
-    a slice of the URL or a generated label.
+    Looks at common ELM fields (key, id, identifier). For OSLC artifacts
+    whose only identifier is an opaque UUID (common in ETM test cases),
+    fall back to a sequential short label like 'TC-1', 'TC-2'.
     """
     for k in ("key", "identifier", "id"):
         v = art.get(k)
-        if v:
+        if v and not _OSLC_UUID.match(str(v)):
             return str(v)
     url = art.get("url", "")
     if url:
         m = _KEY_FROM_URL.search(url)
         if m:
-            return m.group(1)
-    title = art.get("title", "")
-    if title:
-        return title.split()[0][:20]
-    return fallback_prefix
+            cand = m.group(1)
+            if not _OSLC_UUID.match(cand):
+                return cand
+    # Fall back to a sequential generated label
+    n = _fallback_counter.get(fallback_prefix, 0) + 1
+    _fallback_counter[fallback_prefix] = n
+    return f"{fallback_prefix}-{n}"
 
 
 # ── Trace Diagram ───────────────────────────────────────────
@@ -149,6 +203,9 @@ def format_trace_mermaid(items: List[Dict[str, Any]],
     """
     if not items:
         return "_(no requirements to display)_\n"
+
+    # Reset the per-call fallback counter so each diagram numbers from 1.
+    _fallback_counter.clear()
 
     # Auto-decide whether to hide green nodes: if total > max_nodes,
     # focus on gaps.
@@ -195,8 +252,8 @@ def format_trace_mermaid(items: List[Dict[str, Any]],
         bucket = _bucket_for(it)
         node_id = _safe_id(f"REQ_{req_key}_{req_url[-8:]}")
 
-        # Multi-line label using <br/>
-        label = f"{req_key}<br/>{req_title}"
+        # Multi-line label using <br>
+        label = f"{req_key}<br>{req_title}"
         tooltip_parts = []
         if req_status:
             tooltip_parts.append(f"Status: {req_status}")
@@ -217,10 +274,14 @@ def format_trace_mermaid(items: List[Dict[str, Any]],
         # Tasks
         for t in (it.get("tasks") or []):
             t_url = t.get("url", "")
-            t_key = t.get("key") or _short_key(t, "TASK")
+            # Always go through _short_key so OSLC-shape IDs get
+            # replaced with a friendly counter ("TASK-1") instead of
+            # the opaque UUID. _short_key returns t.get("key") as-is
+            # when it's a normal friendly key.
+            t_key = _short_key(t, "TASK")
             t_title = t.get("title", "")
             t_node = _safe_id(f"TASK_{t_key}_{t_url[-8:]}")
-            t_label = f"{t_key}<br/>{t_title}" if t_title else t_key
+            t_label = f"{t_key}<br>{t_title}" if t_title else t_key
             t_tip = "EWM Task"
             if t.get("status"):
                 t_tip += f" · {t['status']}"
@@ -231,10 +292,10 @@ def format_trace_mermaid(items: List[Dict[str, Any]],
         # Tests
         for tc in (it.get("tests") or []):
             tc_url = tc.get("url", "")
-            tc_key = tc.get("key") or _short_key(tc, "TC")
+            tc_key = _short_key(tc, "TC")  # same: short-circuit OSLC UUIDs
             tc_title = tc.get("title", "")
             tc_node = _safe_id(f"TC_{tc_key}_{tc_url[-8:]}")
-            tc_label = f"{tc_key}<br/>{tc_title}" if tc_title else tc_key
+            tc_label = f"{tc_key}<br>{tc_title}" if tc_title else tc_key
             tc_tip = "ETM Test Case"
             if tc.get("status"):
                 tc_tip += f" · {tc['status']}"
