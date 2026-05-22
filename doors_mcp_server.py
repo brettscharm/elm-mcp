@@ -79,7 +79,7 @@ load_dotenv()
 # decide if a newer GitHub release exists; the `connect_to_elm`
 # response also surfaces it so users always know what version they're
 # running.
-__version__ = "0.12.4"
+__version__ = "0.12.5"
 GITHUB_REPO = "brettscharm/elm-mcp"
 
 app = Server("elm-mcp")
@@ -2168,6 +2168,14 @@ async def get_prompt(name: str, arguments: dict | None = None) -> list[PromptMes
         mod = args.get("module", "").strip()
 
         intro = (
+            "🛑 **HARD RULE — READ THIS BEFORE YOU DO ANYTHING:** "
+            "when this audit produces a quality-distribution chart, "
+            "you MUST call the `format_audit_mermaid` tool with the "
+            "bucket counts. DO NOT hand-roll Mermaid `pie` syntax. "
+            "If you type `pie` or `pie title` directly into your "
+            "response, STOP and call the tool. The tool emits the "
+            "correct Mermaid + the copy block for mermaid.live + "
+            "the RQA pointer footer. Hand-rolling loses all of that.\n\n"
             "The user wants a quality audit of a DNG module. Run "
             "the deterministic INCOSE GtWR + IEEE 29148 lint on "
             "every requirement, plus status-awareness checks. The "
@@ -2270,6 +2278,19 @@ async def get_prompt(name: str, arguments: dict | None = None) -> list[PromptMes
         etm = args.get("etm_project", "").strip()
         parts = []
         parts.append(
+            "🛑 **HARD RULE — READ THIS BEFORE YOU DO ANYTHING ELSE:** "
+            "when this workflow produces a visualization, you MUST "
+            "call the `format_trace_mermaid` tool with the assembled "
+            "trace data and surface its output verbatim. DO NOT "
+            "write your own Mermaid diagram. DO NOT use `graph TB`, "
+            "`subgraph`, emoji headers, or custom color palettes. If "
+            "you find yourself typing `flowchart` or `graph` directly "
+            "into your response, STOP — call the tool. Hand-rolled "
+            "diagrams lose click-to-ELM nav, the correct color "
+            "palette, ASCII safety for engineering Unicode, friendly "
+            "OSLC key replacement, AND the copy block for mermaid.live. "
+            "The tool exists exactly to spare you from re-deriving "
+            "this every time.\n\n"
             "The user wants a cross-domain TRACEABILITY GAP report. "
             "Walk DNG -> EWM -> ETM and surface orphans on both sides. "
             "Director-level read: 'where are we missing implementing "

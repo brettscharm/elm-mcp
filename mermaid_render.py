@@ -422,25 +422,44 @@ def format_audit_mermaid(audit_summary: Dict[str, Any]) -> str:
 # ── Convenience: wrap call from MCP handlers ────────────────
 
 _COPY_INSTRUCTION = (
-    "\n**To export / share this diagram:** copy everything between "
-    "the ✂️ markers above and paste into "
-    "[https://mermaid.live](https://mermaid.live). The editor will "
-    "load it instantly, and you can export PNG / SVG, share, or "
-    "embed. Click directives are preserved — every node remains "
-    "a clickable link to the ELM artifact.\n"
+    "\n**To export / share:** copy the BARE diagram source between "
+    "the ✂️ markers below (NOT the ```mermaid``` fence above — that "
+    "would confuse mermaid.live's parser). Paste into "
+    "[https://mermaid.live](https://mermaid.live). The editor loads "
+    "instantly; export PNG / SVG, share, or embed. Click directives "
+    "are preserved — every node remains a clickable link to the "
+    "ELM artifact.\n"
 )
 
 
-def _wrap_with_copy_markers(mermaid_block: str) -> str:
-    """Add visible ✂️ START / END COPY markers around the
-    ```mermaid``` fence so users can spot the copy region instantly.
-    Markers go OUTSIDE the fence so they don't interfere with
-    inline rendering.
+def _strip_fence(mermaid_block: str) -> str:
+    """Strip the leading ```mermaid and trailing ``` from a fenced
+    block, returning just the diagram source."""
+    src = mermaid_block.strip()
+    if src.startswith("```"):
+        src = src.split("\n", 1)[1] if "\n" in src else ""
+    if src.endswith("```"):
+        src = src.rsplit("```", 1)[0]
+    return src.rstrip()
+
+
+def _emit_dual_blocks(mermaid_block: str) -> str:
+    """Emit the diagram TWICE:
+      1. Inside a ```mermaid``` fence → inline render in Bob, Claude,
+         GitHub, etc.
+      2. As bare source between ✂️ START COPY / END COPY markers →
+         pure copy region, no fence delimiters that confuse Mermaid
+         Live's diagram-type detector.
     """
+    bare = _strip_fence(mermaid_block)
     return (
-        "✂️ START COPY ─────────────────────────────────\n"
-        + mermaid_block.rstrip() + "\n"
-        + "✂️ END COPY ─────────────────────────────────\n"
+        mermaid_block.rstrip() + "\n\n"
+        + "_— For copying into mermaid.live, use the block below "
+        "(NOT the rendered one above). The block above includes a "
+        "code-fence delimiter that the Mermaid parser would reject._\n\n"
+        + "✂️ START COPY (for mermaid.live) ─────────────────\n"
+        + bare + "\n"
+        + "✂️ END COPY ──────────────────────────────────────\n"
     )
 
 
@@ -452,28 +471,25 @@ def render_trace_block(items: List[Dict[str, Any]], **kwargs) -> str:
         return body  # already an empty-state message
     header = (
         "## Traceability diagram\n\n"
-        "_Every node in the diagram below is clickable when "
-        "rendered (in IBM Bob inline, or in mermaid.live after "
-        "copy/paste) — opens the artifact in DNG / EWM / ETM. "
-        "Hover for status + owner._\n\n"
+        "_Every node is clickable when rendered (in IBM Bob inline, "
+        "or in mermaid.live after copy/paste) — opens the artifact "
+        "in DNG / EWM / ETM. Hover for status + owner._\n\n"
     )
     footer = (
         "\n_For AI-augmented diagrams (semantic link suggestions, "
         "change-impact heatmaps) point users at IBM ELM AI Hub. "
         "The map above is the deterministic floor._\n"
     )
-    return header + _wrap_with_copy_markers(body) + _COPY_INSTRUCTION + footer
+    return header + _emit_dual_blocks(body) + footer
 
 
 def render_audit_block(audit_summary: Dict[str, Any]) -> str:
-    """Public entry: audit pie. Header + diagram + copy instruction
-    + ELM AI Hub pointer."""
+    """Public entry: audit pie. Header + diagram + copy block."""
     body = format_audit_mermaid(audit_summary)
     if not body.strip().startswith("```"):
         return body
     return ("## Module quality distribution\n\n"
-            + _wrap_with_copy_markers(body)
-            + _COPY_INSTRUCTION
+            + _emit_dual_blocks(body)
             + "\n_For semantic scoring + rewrite suggestions, open "
               "in the Requirements Quality Assistant agent in IBM "
               "ELM AI Hub._\n")
