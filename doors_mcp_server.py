@@ -79,7 +79,7 @@ load_dotenv()
 # decide if a newer GitHub release exists; the `connect_to_elm`
 # response also surfaces it so users always know what version they're
 # running.
-__version__ = "0.13.0"
+__version__ = "0.13.1"
 GITHUB_REPO = "brettscharm/elm-mcp"
 
 app = Server("elm-mcp")
@@ -175,12 +175,28 @@ def _is_newer_version(latest: Optional[str], current: str) -> bool:
 
 
 def _git_pull() -> bool:
-    """Hard-reset the install dir to origin/main. Returns True on success."""
+    """Hard-reset the install dir to origin/main. Handles the detached-
+    HEAD case (e.g. after a `revert_elm_mcp` checkout) by force-checking
+    out main first. Returns True on success."""
     import subprocess
+    pd = _project_dir()
     try:
-        subprocess.run(["git", "-C", _project_dir(), "fetch", "--quiet", "origin"],
+        subprocess.run(["git", "-C", pd, "fetch", "--quiet", "origin"],
                        check=True, timeout=15)
-        subprocess.run(["git", "-C", _project_dir(), "reset", "--hard", "--quiet",
+        # If we're in detached HEAD (after a revert), switch back to main
+        # before resetting so the branch ref advances cleanly.
+        head_ref = subprocess.run(
+            ["git", "-C", pd, "symbolic-ref", "--quiet", "HEAD"],
+            capture_output=True, text=True,
+        )
+        if head_ref.returncode != 0:
+            # Detached HEAD — re-attach to main first.
+            subprocess.run(
+                ["git", "-C", pd, "-c", "advice.detachedHead=false",
+                 "checkout", "main"],
+                check=True, timeout=10, capture_output=True,
+            )
+        subprocess.run(["git", "-C", pd, "reset", "--hard", "--quiet",
                         "origin/main"], check=True, timeout=10)
         return True
     except Exception:
@@ -4149,6 +4165,32 @@ async def list_tools() -> list[Tool]:
             }
         ),
         Tool(
+            name="revert_elm_mcp",
+            description=(
+                "Roll back the local ELM MCP install to any prior "
+                "released version via git tag checkout. Use when the "
+                "user says 'revert to v0.12.7', 'roll back to v0.10.0', "
+                "'go back to the previous version', or 'undo the last "
+                "update'. Without arguments: lists every available "
+                "version tag so the user can pick. With a version "
+                "argument: checks out that tag (detached HEAD — fine "
+                "for running the server). The user must restart their "
+                "AI host for the revert to take effect. To return to "
+                "the latest version afterward, call `update_elm_mcp` "
+                "which detects detached HEAD and re-checks out main."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "version": {
+                        "type": "string",
+                        "description": "Target version tag (e.g. '0.12.7', 'v0.12.7', 'v0.10.0'). Optional — call without args to list available versions."
+                    }
+                },
+                "required": []
+            }
+        ),
+        Tool(
             name="generate_chart",
             description=(_WRITE_GATE +
                 "Generate a chart (bar, horizontal bar, pie, or line) from data and save it as a PNG. "
@@ -7168,6 +7210,144 @@ async def _dispatch_tool(name: str, arguments: Any) -> list[TextContent]:
             return [TextContent(type="text", text=(
                 f"v{latest} is available but `git pull` failed. "
                 f"Run manually: `cd {_project_dir()} && git pull && python3 setup.py`"
+            ))]
+
+        # ── revert_elm_mcp (roll back to a prior version) ─────
+        if name == "revert_elm_mcp":
+            import subprocess as _sub
+            project_dir = _project_dir()
+            if not _is_git_managed():
+                return [TextContent(type="text", text=(
+                    f"This install isn't git-managed (e.g. installed via "
+                    f"Smithery as a frozen bundle) so version rollback "
+                    f"isn't supported. Reinstall the desired version "
+                    f"manually:\n\n"
+                    f"`curl -fsSL https://raw.githubusercontent.com/"
+                    f"{GITHUB_REPO}/main/install.sh | bash`"
+                ))]
+
+            # Fetch tags first so we have the full list (and any newly-
+            # published releases since the install).
+            try:
+                _sub.run(["git", "-C", project_dir, "fetch", "--tags",
+                          "--quiet", "origin"],
+                         check=True, timeout=15)
+            except Exception as e:
+                return [TextContent(type="text", text=(
+                    f"Failed to fetch tags from origin: {e}\n\n"
+                    f"You may be offline or the remote may be "
+                    f"misconfigured. You can still revert to any "
+                    f"locally-known tag listed below."
+                ))]
+
+            # Enumerate available version tags
+            try:
+                out = _sub.run(
+                    ["git", "-C", project_dir, "tag", "-l", "v*",
+                     "--sort=-version:refname"],
+                    capture_output=True, text=True, check=True, timeout=10,
+                )
+                tags = [t.strip() for t in out.stdout.split("\n") if t.strip()]
+            except Exception as e:
+                return [TextContent(type="text",
+                                     text=f"Failed to list tags: {e}")]
+
+            if not tags:
+                return [TextContent(type="text", text=(
+                    "No version tags found locally. Are you on a fresh "
+                    "install? Try `git fetch --tags origin` from a "
+                    "terminal and retry."
+                ))]
+
+            target = (arguments.get("version") or "").strip()
+
+            # No target: list available versions
+            if not target:
+                lines = [
+                    "# ELM MCP — Available Versions",
+                    "",
+                    f"**Current:** v{__version__}",
+                    "",
+                    "**Available tags (latest first):**",
+                    "",
+                ]
+                for t in tags[:25]:
+                    marker = "  ← current" if t == f"v{__version__}" else ""
+                    lines.append(f"- `{t}`{marker}")
+                if len(tags) > 25:
+                    lines.append(f"- _(... {len(tags) - 25} older versions)_")
+                lines += [
+                    "",
+                    "## To revert",
+                    "",
+                    "Call `revert_elm_mcp(version='0.12.7')` (or any "
+                    "tag above) to check that version out. The current "
+                    "server keeps running until you restart your AI "
+                    "host.",
+                    "",
+                    "## To return to latest after a revert",
+                    "",
+                    "Call `update_elm_mcp` — it detects detached HEAD "
+                    "and re-checks out main.",
+                ]
+                return [TextContent(type="text", text="\n".join(lines))]
+
+            # Normalize the target tag
+            tag = target if target.startswith("v") else f"v{target}"
+
+            if tag not in tags:
+                close = [t for t in tags if target.lstrip("v") in t][:5]
+                hint = (f"\n\nDid you mean one of: "
+                        f"{', '.join(close)}?") if close else ""
+                return [TextContent(type="text", text=(
+                    f"Version `{tag}` not found in available tags."
+                    f"{hint}\n\n"
+                    f"Call `revert_elm_mcp` without arguments to see "
+                    f"the full list."
+                ))]
+
+            # Check the target is actually older / different — if equal,
+            # no-op gracefully.
+            if tag == f"v{__version__}":
+                return [TextContent(type="text", text=(
+                    f"You're already on **{tag}**. Nothing to revert."
+                ))]
+
+            # Perform the checkout
+            try:
+                _sub.run(
+                    ["git", "-C", project_dir,
+                     "-c", "advice.detachedHead=false",
+                     "checkout", tag],
+                    check=True, timeout=20,
+                    capture_output=True, text=True,
+                )
+            except _sub.CalledProcessError as e:
+                stderr = (e.stderr or "")[:400]
+                return [TextContent(type="text", text=(
+                    f"`git checkout {tag}` failed.\n\n"
+                    f"```\n{stderr}\n```\n\n"
+                    f"This usually means you have uncommitted local "
+                    f"changes. From a terminal:\n\n"
+                    f"```\ncd {project_dir}\n"
+                    f"git stash      # save local changes\n"
+                    f"git checkout {tag}\n```\n\n"
+                    f"Then restart your AI host."
+                ))]
+            except Exception as e:
+                return [TextContent(type="text",
+                                     text=f"Unexpected checkout error: {e}"
+                                     )]
+
+            _record_check_now()
+            return [TextContent(type="text", text=(
+                f"✓ Reverted to **{tag}** (was v{__version__}).\n\n"
+                f"**Restart your AI assistant** (Bob / Claude Code / "
+                f"etc.) to load this version. The currently-running "
+                f"server keeps using v{__version__} until restart.\n\n"
+                f"**To return to the latest version later:** call "
+                f"`update_elm_mcp` — it detects detached HEAD and "
+                f"re-checks out main + pulls the latest tag."
             ))]
 
         # ── extract_pdf (no connection needed) ────────────────
