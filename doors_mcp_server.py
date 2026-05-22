@@ -79,7 +79,7 @@ load_dotenv()
 # decide if a newer GitHub release exists; the `connect_to_elm`
 # response also surfaces it so users always know what version they're
 # running.
-__version__ = "0.14.2"
+__version__ = "0.14.3"
 GITHUB_REPO = "brettscharm/elm-mcp"
 
 app = Server("elm-mcp")
@@ -1977,6 +1977,24 @@ async def get_prompt(name: str, arguments: dict | None = None) -> list[PromptMes
             "    (Other available types in your EWM project: ...)\n\n"
             "  Address gaps + decisions, or 'push with defaults'.\n"
             "```\n\n"
+            "## 🛑 MANDATORY: Ask about scope before push — tasks + tests gate\n\n"
+            "Before the approval gate, you MUST ask the user "
+            "whether they want the FULL multi-artifact build "
+            "(reqs + EWM tasks + ETM test cases all cross-linked) "
+            "or just the requirements for now. Verbatim prompt:\n\n"
+            "> *\"Drafted N requirements. Before I push to DNG — "
+            "do you also want me to:*\n"
+            "> *  • Create EWM tasks for each requirement (one "
+            "task per req, linked back via implementsRequirement)?*\n"
+            "> *  • Create ETM test cases from the acceptance "
+            "criteria (linked back via validatesRequirement)?*\n"
+            "> *Or just push the requirements for now and leave "
+            "tasks/tests for a separate session?\"*\n\n"
+            "Wait for an explicit choice (full / reqs-only / "
+            "reqs+tasks / reqs+tests). Skip this question and you "
+            "rob the user of the scope decision. Common BA "
+            "workflow: requirements first, tasks/tests after the "
+            "IT architect has designed.\n\n"
             "## Wait for explicit approval — same gate pattern\n\n"
             "Don't push until the user says 'yes' / 'looks good' / 'ship it' / "
             "'push with defaults'. Three escape hatches:\n"
