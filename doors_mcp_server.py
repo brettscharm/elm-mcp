@@ -79,7 +79,7 @@ load_dotenv()
 # decide if a newer GitHub release exists; the `connect_to_elm`
 # response also surfaces it so users always know what version they're
 # running.
-__version__ = "0.14.4"
+__version__ = "0.15.0"
 GITHUB_REPO = "brettscharm/elm-mcp"
 
 app = Server("elm-mcp")
@@ -3735,6 +3735,62 @@ async def list_tools() -> list[Tool]:
         # better handled by your AI host's own file-write tools. Use
         # get_module_requirements + paste/copy if you need text out.
         Tool(
+            name="export_module_to_xlsx",
+            description=(
+                "Export DNG artifacts + their attributes to a polished .xlsx "
+                "workbook. Use this when the user asks for a 'spreadsheet', "
+                "'Excel', 'xlsx', 'dump to Excel', 'export module', or wants "
+                "to share requirements with non-ELM stakeholders. RUN THE "
+                "INTERACTIVE INTERVIEW FIRST (see BOB.md 'Exporting Artifacts "
+                "to Excel'): ask the user which module(s) and which attribute "
+                "columns to include before calling. Defaults to one sheet per "
+                "module + every attribute that appears on any requirement. "
+                "Writes to ~/.elm-mcp/exports/ and returns the file path; the "
+                "user opens it with `open '<path>'` or a double-click. "
+                "Read-only against ELM (no DNG writes)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "project_identifier": {
+                        "type": "string",
+                        "description": "DNG project number or name."
+                    },
+                    "module_identifiers": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "Optional list of module numbers or names "
+                            "(from get_modules). If omitted, exports every "
+                            "module in the project. Each entry follows the "
+                            "same resolution rules as get_module_requirements "
+                            "— ordinal or case-insensitive name."
+                        )
+                    },
+                    "columns": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "Optional list of attribute column names to include "
+                            "beyond ID/Title/Type/URL (those four are always "
+                            "added). Use get_attribute_definitions to discover "
+                            "valid names. If omitted, every attribute that "
+                            "appears on any requirement is included."
+                        )
+                    },
+                    "combined_sheet": {
+                        "type": "boolean",
+                        "description": (
+                            "If true, all requirements land on a single sheet "
+                            "with a Module column. If false (default), one "
+                            "sheet per module."
+                        )
+                    }
+                },
+                "required": ["project_identifier"]
+            }
+        ),
+        Tool(
             name="create_module",
             description=(_REQ_GATE +
                 "Create a new DOORS Next module (a navigable document that holds requirements). "
@@ -7315,6 +7371,7 @@ async def _dispatch_tool(name: str, arguments: Any) -> list[TextContent]:
                     "wrap_up_session", "get_team_actions",
                 ],
                 "Visualization": ["generate_chart"],
+                "Export": ["export_module_to_xlsx"],
             }
 
             tool_descs = {
@@ -9638,6 +9695,118 @@ async def _dispatch_tool(name: str, arguments: Any) -> list[TextContent]:
                     "deterministic floor.",
                 ]
                 return [TextContent(type="text", text="\n".join(lines))]
+
+        elif name == "export_module_to_xlsx":
+            try:
+                from xlsx_export import export_artifacts_to_xlsx
+            except Exception as e:
+                return [TextContent(type="text", text=(
+                    f"Failed to load xlsx_export: {e}. "
+                    "Install openpyxl: `pip install openpyxl>=3.1.0` "
+                    "(it's in requirements.txt)."
+                ))]
+            if not client:
+                return [TextContent(type="text", text=(
+                    "Not connected to ELM. Call `connect_to_elm` first."
+                ))]
+
+            proj_id = (arguments.get("project_identifier") or "").strip()
+            if not proj_id:
+                return [TextContent(type="text",
+                                     text="Error: project_identifier is required.")]
+
+            if not _projects_cache:
+                _projects_cache = client.list_projects()
+            project = _find_by_identifier(_projects_cache, proj_id)
+            if not project:
+                return [TextContent(type="text",
+                                     text=f"DNG project not found: '{proj_id}'")]
+
+            project_key = project["id"]
+            if project_key not in _modules_cache:
+                _modules_cache[project_key] = client.get_modules(project["url"])
+            all_modules = _modules_cache.get(project_key, [])
+            if not all_modules:
+                return [TextContent(type="text", text=(
+                    f"No modules found in '{project['title']}'."
+                ))]
+
+            requested = arguments.get("module_identifiers") or []
+            if requested:
+                selected = []
+                missing = []
+                for ident in requested:
+                    m = _find_by_identifier(all_modules, str(ident).strip())
+                    if m:
+                        if m not in selected:
+                            selected.append(m)
+                    else:
+                        missing.append(str(ident))
+                if missing:
+                    names = "\n".join(f"  {i}. {m['title']}"
+                                       for i, m in enumerate(all_modules, 1))
+                    return [TextContent(type="text", text=(
+                        f"Could not resolve module(s): {', '.join(missing)}.\n\n"
+                        f"Available modules in '{project['title']}':\n{names}"
+                    ))]
+            else:
+                selected = list(all_modules)
+
+            columns = arguments.get("columns") or None
+            combined = bool(arguments.get("combined_sheet"))
+
+            modules_payload = []
+            empty_modules = []
+            for mod in selected:
+                try:
+                    reqs = client.get_module_requirements(mod["url"]) or []
+                except Exception as e:
+                    return [TextContent(type="text", text=(
+                        f"Failed to fetch requirements from module "
+                        f"'{mod.get('title')}': {e}"
+                    ))]
+                modules_payload.append({"name": mod.get("title") or "(untitled)",
+                                          "requirements": reqs})
+                if not reqs:
+                    empty_modules.append(mod.get("title") or "(untitled)")
+
+            if not any(m["requirements"] for m in modules_payload):
+                return [TextContent(type="text", text=(
+                    "No requirements found in the selected module(s) — "
+                    "nothing to export."
+                ))]
+
+            try:
+                path = export_artifacts_to_xlsx(
+                    modules_payload,
+                    project_name=project["title"],
+                    columns=columns,
+                    combined=combined,
+                )
+            except Exception as e:
+                return [TextContent(type="text",
+                                     text=f"export_module_to_xlsx failed: {e}")]
+
+            size_kb = path.stat().st_size / 1024
+            total_reqs = sum(len(m["requirements"]) for m in modules_payload)
+            sheets_note = ("one combined sheet with a Module column"
+                            if combined else
+                            f"{len(modules_payload)} sheet(s) + a Summary tab")
+            empty_note = ""
+            if empty_modules:
+                empty_note = ("\n_Note: these modules were empty and produced "
+                                f"no rows: {', '.join(empty_modules)}._")
+
+            return [TextContent(type="text", text=(
+                f"✓ Exported {total_reqs} requirement(s) across "
+                f"{len(modules_payload)} module(s) to Excel.\n\n"
+                f"**File:** `{path}`\n"
+                f"**Size:** {size_kb:.1f} KB · {sheets_note}\n\n"
+                f"**Open it:** `open '{path}'` (macOS) — or double-click.\n\n"
+                f"Header row is frozen, auto-filter is on, columns are "
+                f"auto-sized. Ready to share."
+                f"{empty_note}"
+            ))]
 
         elif name in ("generate_trace_report", "generate_audit_report"):
             try:

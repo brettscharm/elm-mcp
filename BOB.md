@@ -134,6 +134,7 @@ Before doing anything, check what the user actually wants. The mapping below cat
 | "I'm a BA" / "I'm a business analyst" / "tasked with breaking down a Jira ticket" / "pull this ticket from my downloads" / "turn this Jira ticket into requirements" / "help me with the requirements for this" + PDF path or attached file — ANY business-analyst persona phrasing with a Jira work item | **Step 3k: IMPORT WORK ITEM Path** — same as the explicit `/import-work-item` invocation. Route to it. The BA workflow always means: PDF → DNG requirements (via `create_requirements`, NEVER a local markdown file) → handoff. The v0.14.3 mandatory `tasks + tests too?` gate fires before push, the v0.14.0 18-dimension coverage interview fires during. | interpret "break it down" as "summarize in chat" or "write a markdown file" — that's the wrong tool. BA "break it down" ALWAYS means push to DNG with rigor. |
 | "import this work item" / "import this Jira epic" / "we have an epic in [PDF]" / "/import-work-item" / **user shares a PDF that is clearly a work-item export (header with ID like 'OMS-XXXX', Type / Status / Reporter / Assignee fields, sections like Functional Requirements / Acceptance Criteria / Child Stories) — paste OR attached PDF OR file-path** | **Step 3k: IMPORT WORK ITEM Path** — invoke `/import-work-item` with EITHER `pdf_path` (if the user gave a file path) OR `content` (if they pasted the text). The pasted-text path is the workaround for IBM Bob, whose chat UI doesn't auto-extract PDF attachments. Multi-artifact brownfield: parse epic + reqs + ACs + child stories → push EWM work item + DNG module + ETM test cases + cross-links in one round. **Do NOT offer a 4-option fragmented menu** (import-OR-summarize-OR-tasks-OR-structure). `/import-work-item` covers all of those simultaneously — offer only TWO choices: full import (default) or read-only summary. | require a PDF path. Pasted text works just as well — never block the user when they've already given you the content. Don't guess work item types — call `get_ewm_workitem_types`. Don't try to match Jira assignees to EWM users — leave unset. **Don't fragment the flow** — see "Anti-pattern: don't fragment a unified flow" section below. |
 | "show me the requirements in [module]" / "list reqs" / "read [module]" | **Step 3a: READ Path** | dump every req without filter — interview about filtering first |
+| "export to Excel" / "give me a spreadsheet of [module]" / "dump artifacts to xlsx" / "I need this in Excel for a stakeholder" / "share these reqs with [non-ELM person]" | **§ Exporting Artifacts to Excel** — interview FIRST (which modules? which columns? combined or per-module?), THEN call `export_module_to_xlsx`. The tool writes to `~/.elm-mcp/exports/`; hand the user the path with an `open '<path>'` hint. | call the tool with no arguments and let it default to "every module, every column" — almost always too wide. Always run the 3-question interview. |
 | "update yourself" / "are you up to date" / "pull the latest" / "update the MCP" / "update this server" / "update the elm mcp" | call `update_elm_mcp` ONCE — that's the entire update. **DO NOT run individual `git fetch` / `git pull` / `pip install` / `restart` commands via Bash** — `update_elm_mcp` does all of that internally in a single tool call so the user is prompted at most once (and zero times if `update_elm_mcp` is in their `alwaysAllow`). | run a series of bash commands. The user explicitly said this is friction — eight per-step approvals when one tool call is enough. The tool handles fetch + pull + version comparison + restart-instructions internally. Just call it. |
 | "what's the team doing?" / "what did Sarah do yesterday?" / "who's stuck?" / "team status" | call `get_team_actions` (with optional `who` / `since` / `status` filters) | manually list each user's runs — `get_team_actions` reads the BOB Team Actions module which is auto-populated as the team works |
 | "wrap up" / "I'm done for today" / "good for now" / "pausing" / "/wrap-up" — user signals they're stopping their session | call `wrap_up_session` ONCE with their verbatim notes as `notes=`. This flushes a final entry to BOB Team Actions so teammates see what state the user paused in. | leave the session unwrapped — the auto-log entries are mid-window, not closing. The wrap-up entry tags the session as Completed/Hand-off/Stuck/Paused so anyone reading later knows whether to pick it up |
@@ -170,6 +171,53 @@ Two real choices, not four fragmented ones. The user always gets a preview befor
 **Read-only summary** is the only legit alternative — invoke `/review-requirements` AFTER importing into DNG, OR just answer in chat without calling any write tools. Don't offer "summarize without import" as a peer to "import" — they're different tasks at different lifecycle stages.
 
 **Never** skip straight to code generation when the user mentions building anything that could be tracked in ELM. The whole point of this MCP is to keep ELM as the system of record.
+
+## 📊 Exporting Artifacts to Excel
+
+When the user asks for a spreadsheet, .xlsx, "export to Excel," "dump this module," or anything that signals **"I need these requirements in a sharable file for a non-ELM stakeholder"** — do NOT just call `export_module_to_xlsx` with no arguments. Run this short interview, then call the tool with the user's choices.
+
+The point: a no-args export grabs every module in the project with every attribute as a column. That's almost never what the user actually wants. Two questions and you produce something they can hand to a PM without trimming.
+
+### The 3-question interview
+
+1. **Which module(s)?**
+   - Call `get_modules(project_identifier=…)` and show the numbered list.
+   - Default: *all* modules, one sheet each. Confirm or let them narrow.
+   - Multi-pick is fine — pass a list of names/numbers as `module_identifiers`.
+
+2. **Which attribute columns?**
+   - Call `get_attribute_definitions(project_identifier=…)` so you can show the user what exists.
+   - Default: *all enum-valued attributes* (Status, Priority, Stability, etc.) — those are the high-signal ones.
+   - Offer to add free-form attrs (Owner, Created On, Modified On) if the user wants audit info.
+   - SKIP the noisy linkage attributes by default (Tracked By, References Term, instanceShape, component) unless the user asks for traceability columns.
+
+3. **One combined sheet or one sheet per module?**
+   - Default: one sheet per module (`combined_sheet=false`). Easier to read when each module has a different artifact-type mix.
+   - Combined (`combined_sheet=true`) is right when the user wants to pivot / filter across modules in Excel.
+
+Then call:
+
+```
+export_module_to_xlsx(
+    project_identifier=…,
+    module_identifiers=[…],         # omit for all
+    columns=["Status", "Priority", …],   # omit for all
+    combined_sheet=False,
+)
+```
+
+### Surfacing the result
+
+The tool returns a file path. Hand it back verbatim with `open '<path>'` (macOS) so the user can launch Excel in one click. Don't paraphrase the contents — the file IS the answer. If any selected module was empty, the tool notes it in the response; mention that to the user so they're not surprised.
+
+### When NOT to use this
+
+- The user just wants to *see* a couple of reqs in chat → use `get_module_requirements`, don't write a file.
+- The user wants a traceability matrix (req → task → test) → use `generate_trace_report` (HTML, clickable graph), not Excel.
+- The user wants a chart → use `generate_chart`.
+- The user wants a quality audit → use `audit_module` + `generate_audit_report`.
+
+Excel is for **flat tables of requirements + attributes**. Anything graph-shaped or visual-shaped has a better tool.
 
 ## 🏛️ Requirements Engineering Discipline (BOB as Systems Engineer)
 
