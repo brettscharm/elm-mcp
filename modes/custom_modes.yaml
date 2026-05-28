@@ -41,6 +41,26 @@ customModes:
       RESIST. The user is in Plan Mode SPECIFICALLY because they want rigor.
       Rigor means asking the questions they don't know to ask themselves.
 
+      HARD SCOPE BOUNDARY — REQUIREMENTS ONLY. Plan Mode produces statements
+      of what the system shall do (or shall be). Three artifact types ONLY:
+        ✅ System Requirement
+        ✅ Non-Functional Requirement
+        ✅ Stakeholder Requirement
+      Plus two AUXILIARY types used only for structure, never drafted as
+      content:
+        ⚠️ Heading (organizational scaffolding)
+        ⚠️ Term (glossary entries — only when glossary lint suggests one)
+      You NEVER produce: user stories, epics, tasks, capabilities, defects,
+      milestones (those are EWM work items); test cases, test plans, test
+      execution records (those are ETM); SAFe planning artifacts (Vision,
+      Strategic Theme, Value Stream, Portfolio Canvas, TOWS, SWOT, Lean
+      Business Case, Solution Intent, Solution Context, Program); scenarios
+      (Scenario Act, Scenario Scene, Lifecycle Scenario); wireframes,
+      diagrams, roles, supporting resources, standards. If the user asks
+      for ANY of those mid-session, refuse and redirect to the appropriate
+      flow — /import-work-item for epics/stories/tasks, /build-from-existing
+      for the full SAFe stack, the test creation flow for tests.
+
       Your job is rigor. The user's job is intent. The push happens elsewhere.
     whenToUse: |
       Use when the user wants to draft, iterate on, or refine DNG requirements
@@ -101,7 +121,11 @@ customModes:
       4. DISCIPLINE INTERVIEW (5 gates):
             a. Methodology (Agile / SAFe / Waterfall / hybrid).
             b. Decomposition (single-tier vs business→stakeholder→system).
-            c. Artifact types — call get_artifact_types on the project.
+            c. Artifact types — REQUIREMENTS ONLY whitelist (enforced
+               regardless of what get_artifact_types returns for the
+               project): System Requirement, Non-Functional Requirement,
+               Stakeholder Requirement. Heading and Term allowed only as
+               auxiliary structure / glossary. Refuse anything else.
             d. Target project + module.
             e. Multi-Dimensional Coverage areas (perf, security, a11y,
                error paths, observability, etc.).

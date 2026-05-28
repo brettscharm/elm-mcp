@@ -164,9 +164,45 @@ Run after the Context Gate. Each one is a real stop.
 |---|---|
 | Methodology | Agile / SAFe / Waterfall / hybrid? |
 | Decomposition | Single-tier or business → stakeholder → system? |
-| Artifact types | Call `get_artifact_types` on the project; show options |
+| Artifact types | **REQUIREMENTS ONLY whitelist** (see below). Do not show the full `get_artifact_types` list — Plan Mode is constrained. |
 | Target | Which project? Which module (existing or new)? |
 | Coverage | Which dimensions? functional, performance, security, accessibility, error paths, observability, capacity, localization, … |
+
+### Artifact types — the hard whitelist
+
+Plan Mode produces statements of what the system **shall** do (or shall be). Nothing else. Even if the DNG project exposes 27 artifact types, you only draft these three:
+
+| Type | Format | Example |
+|---|---|---|
+| **System Requirement** | "The system shall…" | "The system shall convert temperatures from Celsius to Fahrenheit with ±0.01°C accuracy." |
+| **Non-Functional Requirement** | "<quality> shall be…" | "Response time shall be ≤ 200 ms p95 under nominal load." |
+| **Stakeholder Requirement** | "<role> shall be able to…" | "Regulators shall be able to audit all conversions for 7 years." |
+
+Two auxiliary types are allowed only for structure, never as standalone drafts:
+
+- **Heading** — organizational scaffolding inside a module ("3.1 Performance Requirements")
+- **Term** — glossary entries, triggered only when the glossary lint suggests one
+
+### Refused outside this whitelist
+
+If the user asks for any of the following, refuse politely and redirect:
+
+| User asks for | Refuse — reason | Redirect to |
+|---|---|---|
+| User stories ("As a... I want...") | EWM work item, not a requirement | `/import-work-item` or `/build-from-existing` |
+| Epics, Capabilities | EWM work items | `/import-work-item` |
+| Tasks | EWM work items | `/build-from-existing` |
+| Defects, Milestones | EWM work items | `create_defect` directly after reqs are pushed |
+| Test cases, Test plans, TERs | ETM artifacts | ETM creation flow after reqs are pushed |
+| Scenarios (Act, Scene, Lifecycle) | Usage walkthroughs, not requirements | `/build-from-existing` if part of a SAFe stack |
+| SAFe Vision, Themes, Value Streams, Portfolio Canvas, TOWS, SWOT, Lean Business Case, Solution Intent, Solution Context, Program | Planning artifacts, not requirements | `/build-from-existing` or `/build-new-project` |
+| Wireframes, Free-Form Diagrams, Roles, Supporting Resources, Standards | Design / reference artifacts | Out of scope for Plan Mode |
+
+Standard refusal:
+
+> That's not a requirement — Plan Mode is requirements-only. For [stories/tasks/tests/SAFe artifacts], use [appropriate flow]. We'll finish the requirements set here first.
+
+### Coverage gate extension by compliance
 
 If compliance was named, **extend the Coverage gate** with standard-mandated dimensions:
 
