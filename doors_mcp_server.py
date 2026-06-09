@@ -79,7 +79,7 @@ load_dotenv()
 # decide if a newer GitHub release exists; the `connect_to_elm`
 # response also surfaces it so users always know what version they're
 # running.
-__version__ = "0.18.0"
+__version__ = "0.19.0"
 GITHUB_REPO = "brettscharm/elm-mcp"
 
 app = Server("elm-mcp")
@@ -5179,6 +5179,50 @@ async def list_tools() -> list[Tool]:
             }
         ),
         Tool(
+            name="find_traceability_gaps",
+            description=(
+                "Scan a DNG project (optionally including linked EWM/ETM) "
+                "for cross-artifact traceability gaps that surface late "
+                "in audits: untested requirements (no validatedBy link to "
+                "any test), orphan test cases (no validates link to any "
+                "req), unowned requirements (no Owner set), and premature "
+                "work items (EWM tasks/stories linked to DNG reqs still "
+                "in Draft status). Read-only — never mutates ELM state. "
+                "Use when the user asks 'are we audit-ready?', 'what's "
+                "missing in module X?', 'show me untested reqs', or "
+                "before generating a compliance packet."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "project_identifier": {
+                        "type": "string",
+                        "description": "DNG project number or name."
+                    },
+                    "checks": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "Which checks to run. Any of: untested_reqs, "
+                            "orphan_tests, unowned_reqs, "
+                            "stale_workitem_links, premature_workitems. "
+                            "Omit for all."
+                        )
+                    },
+                    "module_filter": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "Optional list of module names to limit the "
+                            "scan (substring match). If omitted, scans "
+                            "every module in the project."
+                        )
+                    }
+                },
+                "required": ["project_identifier"]
+            }
+        ),
+        Tool(
             name="analyze_change_impact",
             description=(
                 "Analyze the blast radius of a proposed change. Walks the "
@@ -7438,6 +7482,7 @@ async def _dispatch_tool(name: str, arguments: Any) -> list[TextContent]:
                 "Visualization": ["generate_chart"],
                 "Export": ["export_module_to_xlsx"],
                 "Change impact": ["analyze_change_impact"],
+                "Traceability audit": ["find_traceability_gaps"],
             }
 
             tool_descs = {
@@ -9873,6 +9918,91 @@ async def _dispatch_tool(name: str, arguments: Any) -> list[TextContent]:
                 f"auto-sized. Ready to share."
                 f"{empty_note}"
             ))]
+
+        elif name == "find_traceability_gaps":
+            try:
+                from traceability_gaps import find_gaps, CHECK_LABELS
+            except Exception as e:
+                return [TextContent(type="text",
+                                     text=f"Failed to load traceability_gaps: {e}")]
+            if not client:
+                return [TextContent(type="text", text=(
+                    "Not connected to ELM. Call `connect_to_elm` first."
+                ))]
+
+            proj_id = (arguments.get("project_identifier") or "").strip()
+            if not proj_id:
+                return [TextContent(type="text",
+                                     text="Error: project_identifier is required.")]
+            checks = arguments.get("checks") or None
+            module_filter = arguments.get("module_filter") or None
+
+            try:
+                report = find_gaps(client, proj_id,
+                                     checks=checks,
+                                     module_filter=module_filter)
+            except Exception as e:
+                return [TextContent(type="text",
+                                     text=f"find_traceability_gaps failed: {e}")]
+
+            if "error" in report:
+                return [TextContent(type="text", text=report["error"])]
+
+            summary = report.get("summary", {})
+            total = summary.get("total_gaps", 0)
+            project_name = report.get("project", proj_id)
+            mods_scanned = report.get("modules_scanned", [])
+
+            lines = [
+                f"# Traceability gaps — {project_name}",
+                f"_Scanned {len(mods_scanned)} module(s)_\n",
+                f"**Total gaps found: {total}**\n",
+            ]
+
+            if total == 0:
+                lines.append(
+                    "✅ No gaps detected on the checks that ran. "
+                    "(Note: stale_workitem_links is a stub — full check "
+                    "lands in a future patch release.)"
+                )
+                return [TextContent(type="text", text="\n".join(lines))]
+
+            for check_key in ("untested_reqs", "premature_workitems",
+                                "unowned_reqs", "orphan_tests",
+                                "stale_workitem_links"):
+                items = report.get(check_key, [])
+                if not items:
+                    continue
+                label = CHECK_LABELS.get(check_key, check_key)
+                lines.append(f"\n## {label} ({len(items)})\n")
+                shown = items[:25]
+                for it in shown:
+                    title = it.get("title", "?")
+                    url = it.get("url", "")
+                    mod = it.get("module", "")
+                    reason = it.get("reason", "")
+                    parts = [f"**{title}**"]
+                    if mod:
+                        parts.append(f"_(in: {mod})_")
+                    if url:
+                        parts.append(f"[link]({url})")
+                    if reason:
+                        parts.append(f"\n  — {reason}")
+                    lines.append("- " + " ".join(parts))
+                if len(items) > 25:
+                    lines.append(f"\n_... and {len(items) - 25} more — "
+                                  f"call again with `module_filter` to "
+                                  f"narrow scope_")
+
+            lines.append("\n---")
+            lines.append(
+                "_Next steps: untested reqs → swap to 📝 Plan Mode to "
+                "add test requirements; unowned reqs → assign Owner in "
+                "DNG; premature work items → either approve the linked "
+                "req or pull the work item link._"
+            )
+
+            return [TextContent(type="text", text="\n".join(lines))]
 
         elif name == "analyze_change_impact":
             try:
