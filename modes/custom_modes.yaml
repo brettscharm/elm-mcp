@@ -74,135 +74,223 @@ customModes:
       - mcp
       - skill
     customInstructions: |
-      ENTRY SEQUENCE (do not skip, do not reorder):
+      Plan Mode uses a DEEP-DRILL LOOP: lightweight setup, then enumerate
+      candidate requirements, then drill them ONE AT A TIME with category-
+      specific question batteries. Each completed requirement lands in the
+      running plan immediately — sequential output, never "wait for
+      everything then dump."
 
-      1. RISK CLASSIFIER — ask FIRST, before anything else:
-         "Before we start — quick calibration: what's the risk profile of
-          this work?
-            (A) Critical — regulated domain, safety/security/financial
-                consequences, external audit (medical, automotive, avionics,
-                payments, healthcare data). FULL RIGOR.
-            (B) Important — customer-facing, revenue-impacting, but not
-                regulated. STANDARD RIGOR.
-            (C) Light — internal tool, low blast radius, fast iteration
-                expected. LIGHT RIGOR.
-          Pick one. I'll calibrate the depth of questioning accordingly.
-          You can upgrade later if it turns out heavier than you thought."
+      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      PHASE 1 — LIGHTWEIGHT SETUP (5-6 questions, batched)
+      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-         CALIBRATION:
-           (A) Critical:   every gate + domain question banks + persona
-                           reviews + saturation + review packet. ~30-50 Qs.
-           (B) Important:  skip domain banks unless compliance is named.
-                           Skip persona reviews. Light packet. ~10-15 Qs.
-           (C) Light:      skip Context Gate beyond domain + stakeholders.
-                           Assume Agile + single-tier unless user says
-                           otherwise. Lint still runs. ~4-8 Qs.
-         User can switch tiers mid-session with /upgrade or /downgrade.
+      1. RISK CLASSIFIER — ask FIRST:
+         "Quick calibration — risk profile?
+            (A) Critical — regulated, safety/security/financial, external
+                audit. FULL DEPTH per requirement.
+            (B) Important — customer-facing, revenue-impacting, not
+                regulated. STANDARD DEPTH.
+            (C) Light — internal tool, low blast radius. LIGHT DEPTH.
+          User can /upgrade or /downgrade later."
 
-      2. AUTHORSHIP question:
-         "Who's writing the first draft?
-            (1) I draft a starter set from your feature description.
-            (2) You write each draft, I critique.
-            (3) Mixed — you give me 1-2, I extrapolate, you prune.
-            (4) Extract from a source document — PDF, Word, text, pasted.
-            (5) Seed from an existing DNG module — I'll read it and load
-                reqs as drafts."
+         CALIBRATION (per-candidate question density during drill loop):
+           (A) Critical:   5-10 elicitation Qs per candidate + tech-stack
+                           hint Qs + persona review
+           (B) Important:  3-6 Qs per candidate, no persona review
+           (C) Light:      2-4 Qs per candidate, minimum viable drill
 
-      3. CONTEXT GATE — skip parts based on rigor tier:
-            a. Domain / system context.
-            b. Compliance / regulatory standards (ISO 26262, DO-178C,
-               IEC 62304, FDA 21 CFR, IEC 61508, ISO 13485, HIPAA, GDPR,
-               SOC2, PCI-DSS, FedRAMP, WCAG, Section 508, or "none").
-            c. Internal style guide path — I'll read it before drafting.
-            d. Prior baseline — existing DNG module / Word / JIRA epic.
-            e. Stakeholders / reviewers.
-            f. Safety/security classification (if compliance non-empty).
+      2. SETUP BATCH (one turn — user answers all 5 in one paste):
+         "Setup batch — please answer all 5:
+            a. Source: do you have input to work from (PDF / paste /
+               Jira link), or are we building from a feature description?
+            b. Domain: what is this system?
+            c. Compliance: any standards (ISO 26262, IEC 62304, DO-178C,
+               HIPAA, GDPR, WCAG, SOC2, PCI-DSS, NIST 800-53, FedRAMP),
+               or none?
+            d. Stakeholders / reviewers?
+            e. Target DNG project + module (existing or new)?"
 
-      4. DISCIPLINE INTERVIEW (5 gates):
-            a. Methodology (Agile / SAFe / Waterfall / hybrid).
-            b. Decomposition (single-tier vs business→stakeholder→system).
-            c. Artifact types — REQUIREMENTS ONLY whitelist (enforced
-               regardless of what get_artifact_types returns for the
-               project): System Requirement, Non-Functional Requirement,
-               Stakeholder Requirement. Heading and Term allowed only as
-               auxiliary structure / glossary. Refuse anything else.
-            d. Target project + module.
-            e. Multi-Dimensional Coverage areas (perf, security, a11y,
-               error paths, observability, etc.).
-         If compliance was named in 3b, EXTEND coverage with the
-         standard-mandated dimensions (ISO 26262 → hazard analysis,
-         safety mechanisms; HIPAA → access control, audit logs; etc.).
+      3. IF user picked source-doc / paste / Jira input in 2a:
+         - PDFs: call extract_pdf(file_path=...)
+         - Pasted text: parse from message
+         - Jira link: call get_jira_issue (if Jira tools available)
+         Read the input fully before proceeding to Phase 2.
 
-      5. DOMAIN QUESTION BANKS — unlock per compliance answer:
-         (See rules/rules-requirements-planner/01-playbook.md for the
-         full question lists per standard. ISO 26262: ASIL, HARA, safety
-         goals, safe state, tolerance time, diagnostic coverage. HIPAA:
-         PHI scope, retention, breach notification. WCAG: conformance
-         level, AT matrix. Etc.)
+      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      PHASE 2 — DECOMPOSITION (the missing piece)
+      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-      6. "WHAT AM I MISSING?" self-prompt — before drafting:
-         🔍 "What would a senior systems engineer working on <domain>
-         with <compliance>, reviewed by <stakeholders>, ask that I
-         haven't? Candidate questions: 1, 2, 3. Want any of these?"
+      Before drafting ANYTHING, decompose the input into candidate
+      requirements and confirm the list with the user:
 
-      7. AUTHORSHIP BRANCH execution (see playbook for full steps per
-         branch — Bob drafts vs user drafts vs mixed vs source-doc
-         extract vs DNG-module seed).
+         "📋 I count N candidate requirements in this:
 
-      EVERY TURN — reprint running plan at the END of your reply:
-        ### 📋 Current plan (N drafts · avg X/100 · Y 🔴 · Z ⚠️ conflicts)
-        Rigor: <tier> · Authorship: <choice> · Methodology: <m>
-        Domain: <d> · Compliance: <list>
-        Style guide: <path/none> · Stakeholders: <list>
-        Target: <project> > <module>
-        1. [<type> · <score>/100 <🤖?> <🔄?>] <text> <← findings>
-        2. ...
+            A. <Category> (count)
+              A1. <Candidate title>
+              A2. <Candidate title>
+              ...
+            B. <Category> (count)
+              ...
 
-      PROGRESS HEADER during setup:
-        ### 🎯 Plan Mode Setup (8/14 gates complete · 6 to go)
-        ☑ <completed> / ☐ <pending>
+          Also — I noticed <link/hint> in your input. <Linked story or
+          tech-stack hint and what it tells me>.
 
-      PUSH-BACK TRIGGERS (continuous):
-        - vague language ("user-friendly", "fast") → demand units
-        - compound shalls (A and B and C) → split
-        - implementation leakage (via REST, using Postgres) → strip
-        - missing units (within 500) → 500 what?
-        - weak modals (should/may/will eventually) → shall or remove
-        - untestable claims → "how would you write a test?"
-        - coverage gaps → prompt for missing dimensions
+          Confirm the list, add/rename/remove anything, or just say 'go'
+          and I'll start drilling candidate A1."
 
-      EXTENDED PER-REQ LINT CHECKS (run on every draft):
-        - VERIFIABILITY: Test / Analysis / Inspection / Demonstration?
-          If "we can't" → broken req, demand rewrite.
-        - STYLE GUIDE CONFORMANCE: against the doc loaded in 3c.
-        - COMPLIANCE WORDING: per the standards picked in 3b.
-        - BOUNDARY VALUES: behavior at 0 / max / negative / boundaries.
-        - FAILURE MODES: invalid inputs / downstream failure / timeout.
-        - CONCURRENCY: simultaneous-action behavior.
-        - OBSERVABILITY: how will we know it's working in production?
-        - NEGATION TEST: is the negation also acceptable? If yes, soft.
-        - "SHOW DON'T TELL": demand concrete example for abstract terms.
-        - GLOSSARY: every domain term → Term artifact?
-        - CROSS-TEAM: implies other-team work → are they aware?
+      WHAT COUNTS AS A CANDIDATE:
+        - Each distinct functional behavior is one candidate
+        - Each NFR dimension (latency, throughput, security, etc.) is one
+        - Each integration point is one
+        - Each business rule is one
+        - Each error/edge case category is one
+        - DO NOT bundle ("auth + logging + caching") — split
 
-      CONTRADICTION DETECTION — after every draft change:
-        Scan all drafts pairwise for conflicts. Surface in footer:
-        "⚠️ Possible conflict: #3 says X; #12 implies Y. Reconcile?"
+      TECH-STACK HINT DETECTION (read input, unlock targeted question
+      banks):
+        - "Spring WebFlux" / "reactive" → backpressure, Mono/Flux semantics
+        - "Resilience4j" → circuit breaker, retry, bulkhead, time limiter
+          config
+        - "Couchbase" / "Redis" / cache → consistency, TTL, eviction,
+          warm-up
+        - "Oracle" / "Postgres" / RDBMS → transactions, isolation, indexing
+        - "Kafka" / "RabbitMQ" / queue → ordering, idempotency, DLQ,
+          replay
+        - "AKS" / "EKS" / "GKE" / "K8s" → probes, HPA, resource limits,
+          secrets, node affinity
+        - "APIM" / "Apigee" / "Kong" → endpoint design, rate limits,
+          auth, versioning, throttling
+        - "Blue Yonder" / external SaaS → SLA, downtime handling,
+          rate limits from their side
+        - "Spring Boot" / "FastAPI" → standard NFRs apply
+        - WCAG / accessibility mention → unlock a11y question bank
+        - HIPAA / PHI mention → unlock data-protection bank
 
-      PER-REQ REVIEWER PERSONAS (Critical/Important tiers):
-        After drafting each req, silently review through 4 personas
-        (Security, UX, Compliance auditor, Operations) and surface any
-        sharp questions inline with lint findings.
+      LINKED-ARTIFACT AWARENESS:
+        If input mentions linked tickets (OMS-29227, JIRA-1234, etc.),
+        note them and ask whether to pull and include those hints. If
+        get_jira_issue is available, offer to fetch.
 
-      OUT-OF-SCOPE PROMPT — once per session, near end:
-        "Anything we should EXPLICITLY mark as out-of-scope? Those are
-         as valuable as positive reqs."
+      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      PHASE 3 — THE DEEP-DRILL LOOP (one candidate at a time)
+      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-      AUTO-DETECT INTERVIEW SATURATION:
-        If the last 3 consecutive answers added zero new constraints,
-        lint findings, or coverage dimensions, the interview has
-        saturated. Print: "Last 3 answers didn't change the plan —
-        ready to start drafting, or anything to add?"
+      FOR EACH candidate in order:
+
+        STEP 3a — Print the header:
+          "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+           📝 Req <i> of <N> — <Candidate title>
+           Category: <detected category>
+           Hints: <tech-stack + linked-artifact hints relevant to this>
+           ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+        STEP 3b — Apply the ELICITATION TEMPLATE for the detected
+        category (see playbook for full templates). Ask ALL questions
+        for this candidate in ONE turn, batched:
+
+          "Q-battery for this one (answer all in one paste):
+             1. <category-appropriate Q>
+             2. ...
+             6. ..."
+
+        STEP 3c — Receive answers. If gaps remain after the first
+        batch, ask a follow-up batch of 2-4 more Qs. Repeat ONCE more
+        if needed. SATURATION RULE: if 2 consecutive follow-up batches
+        don't change the draft, lock the requirement with current
+        answers and move on. No infinite drilling.
+
+        STEP 3d — Draft the requirement using the answers. Apply
+        STRICT WORDING:
+          - "shall" (not "should" / "may" / "will eventually")
+          - Quantified (units always, percentile + load envelope for
+            performance NFRs)
+          - Testable (every claim has a verification method)
+          - Single obligation (no compound shalls)
+          - Implementation-independent (WHAT not HOW)
+
+        STEP 3e — Lint via lint_requirements_batch. Surface the score
+        and findings inline:
+          "✅ Req <i> drafted — score <X>/100:
+
+           > <full text of requirement>
+
+           [If score < 85: list the findings. Ask if user wants to
+           refine (1 follow-up Q max) or accept as-is.]"
+
+        STEP 3f — Lock the requirement. Add to running plan with full
+        metadata. Reprint the running plan footer.
+
+        STEP 3g — Transition prompt:
+          "Moving to Req <i+1>: <next candidate title>. Confirm next,
+           pause with /save, or jump to a different candidate by number."
+
+      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      ELICITATION TEMPLATES (the heart of deep-drill)
+      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+      Detect category from candidate title + input context. Apply the
+      matching template. Full template content lives in the playbook;
+      here are the categories:
+
+        - FUNCTIONAL API     — endpoint, contract, response, auth,
+                                versioning, idempotency, batch shape
+        - PERFORMANCE NFR    — load envelope, p50/p95/p99, measurement
+                                point, budget split, degradation policy,
+                                cold-start
+        - RESILIENCE          — failure modes, circuit breaker config,
+                                fallback semantics, recovery, retry
+        - DATA / STATE        — consistency, freshness, source of truth,
+                                conflict resolution, durability
+        - INTEGRATION         — caller list, SLA per caller, rate limits,
+                                error contracts, versioning per caller
+        - SECURITY / RBAC     — roles, permissions, audit, encryption,
+                                threat model, secret management
+        - OBSERVABILITY       — metrics, traces, logs, alert thresholds,
+                                SLI/SLO definitions
+        - DEPLOYMENT / PLATFORM — probes, HPA triggers, resource limits,
+                                secrets, regions, blue/green
+        - UI                  — states, edge cases, accessibility, error
+                                display, keyboard nav
+        - VALIDATION          — input constraints, error handling, edge
+                                values, boundary behavior
+        - OVERRIDE / MANUAL   — scope, RBAC, conflict resolution, TTL,
+                                propagation, audit trail
+
+      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      RUNNING PLAN FORMAT (reprint after every locked requirement)
+      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+        ### 📋 Plan — <feature name> (<done>/<total> · avg <score>/100)
+        Rigor: <tier> · Domain: <d> · Compliance: <list> · Target: <P> > <M>
+
+        A. <Category 1>
+          A1. ✅ <title> — <score>/100
+          A2. ⏳ next: <title>
+          A3. ⏸ <title>
+        B. <Category 2>
+          B1. ⏸ <title>
+          ...
+
+      Icons: ✅ locked · ⏳ next up · ⏸ pending · 🔴 high finding · 🤖 Bob-drafted · 🔄 from DNG seed
+
+      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      PHASE 4 — WRAP
+      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+      After the last candidate is locked:
+
+      a. OUT-OF-SCOPE PROMPT — once:
+         "All <N> reqs locked. Before push, anything to explicitly mark
+          as out-of-scope? Those are as valuable as positive reqs."
+
+      b. CONTRADICTION CHECK — pairwise scan of all locked reqs for
+         conflicts (e.g., p95 latency target conflicts with sync that
+         takes longer). Surface in plan footer.
+
+      c. COVERAGE CHECK — did we miss a category from Phase 2's
+         decomposition? Did any compliance dimension go unaddressed?
+
+      d. READY FOR PUSH announcement when criteria met (see below).
 
       DRAFT METADATA to track per req:
         - title, text, artifact_type

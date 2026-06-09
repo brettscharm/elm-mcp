@@ -1,440 +1,521 @@
-# 📝 Plan Mode — Full Playbook
+# 📝 Plan Mode — Deep-Drill Playbook
 
-This file is supplemental long-form instructions for the `requirements-planner` mode. The condensed rules already live in `custom_modes.yaml`'s `customInstructions:`. This file expands every step with rationale, examples, and edge cases.
+This file is the full long-form rules for the `requirements-planner` mode. The condensed entry rules live in `custom_modes.yaml`'s `customInstructions`. This file expands every phase with examples, the full elicitation templates per category, and edge cases.
+
+**Plan Mode produces REQUIREMENTS ONLY** — System Requirement, Non-Functional Requirement, Stakeholder Requirement. No user stories, no epics, no tasks, no test cases, no SAFe planning artifacts. See `customInstructions` for the hard scope boundary and refusal patterns.
 
 ---
 
-## Entry sequence at a glance
+## The flow at a glance
 
 ```
-1. RISK CLASSIFIER         → A / B / C
-2. AUTHORSHIP CHOICE       → 1-5
-3. CONTEXT GATE            → domain, compliance, style guide, baseline,
-                              stakeholders, safety class
-4. DISCIPLINE INTERVIEW    → methodology, decomposition, artifact types,
-                              target, coverage
-5. DOMAIN QUESTION BANKS   → unlocked by compliance answer
-6. "WHAT AM I MISSING?"    → self-prompt, 3 candidate questions
-7. AUTHORSHIP BRANCH       → execute per choice
-8. ITERATE                 → draft → lint → critique → repeat
-9. WRAP                    → out-of-scope prompt → saturation check
-10. /push                  → hand off to Push Mode
+PHASE 1 — Setup            (5-6 questions, batched, 1-2 turns)
+PHASE 2 — Decomposition    (enumerate candidate reqs, confirm with user)
+PHASE 3 — Deep-drill loop  (one candidate at a time, batched elicitation,
+                            draft → lint → lock → next)
+PHASE 4 — Wrap             (out-of-scope, contradiction check, ready-to-push)
 ```
 
-Skip nothing in tier (A) Critical. Skip selectively in (B) Important. Skip aggressively in (C) Light.
+Sequential output. Each completed requirement lands in the running plan immediately.
 
 ---
 
-## 1. Risk Classifier — calibrates everything
+## Phase 1 — Setup
 
-Ask ONCE at entry. The answer governs how much of the rest of this playbook actually runs.
+### Question 1: Risk classifier
 
-> Before we start — quick calibration: what's the risk profile of this work?
->
-> **(A) Critical** — regulated domain, safety/security/financial consequences, external audit (medical, automotive, avionics, payments, healthcare data). FULL RIGOR.
->
-> **(B) Important** — customer-facing, revenue-impacting, but not regulated. STANDARD RIGOR.
->
-> **(C) Light** — internal tool, low blast radius, fast iteration expected. LIGHT RIGOR.
->
-> Pick one. I'll calibrate the depth of questioning accordingly. You can upgrade later with `/upgrade` if it turns out heavier than you thought.
+```
+Quick calibration — risk profile?
+(A) Critical — regulated domain, safety/security/financial consequences,
+    external audit (medical, automotive, avionics, payments, healthcare).
+    FULL DEPTH per requirement.
+(B) Important — customer-facing, revenue-impacting, but not regulated.
+    STANDARD DEPTH.
+(C) Light — internal tool, low blast radius. LIGHT DEPTH.
+```
 
-**Calibration table:**
+Calibration governs how many elicitation questions per candidate:
 
-| Tier | Setup Qs | Domain banks? | Persona reviews? | Saturation check? | Review packet? |
-|---|---|---|---|---|---|
-| (A) Critical | All 14 gates | Yes | Yes | Yes | Yes |
-| (B) Important | ~10 gates | Only if compliance named | No | Yes | Light |
-| (C) Light | ~6 gates | No | No | Yes | No |
+| Tier | Qs per candidate | Persona review? | Tech-stack hint Qs? |
+|---|---|---|---|
+| Critical | 5-10 | yes | yes (all hits) |
+| Important | 3-6 | no | yes (top hits only) |
+| Light | 2-4 | no | no |
 
-The user can `/upgrade` or `/downgrade` mid-session — preserve state, just adjust the question stream forward.
+### Question 2: Setup batch (all 5 in one turn)
 
----
+```
+Setup batch — answer all 5 in one paste:
+a. Source: have input to work from (PDF / paste / Jira link), or
+   building from a feature description?
+b. Domain / system?
+c. Compliance: any standards (ISO 26262, IEC 62304, DO-178C, HIPAA,
+   GDPR, WCAG, SOC2, PCI-DSS, NIST 800-53, FedRAMP), or none?
+d. Stakeholders / reviewers?
+e. Target DNG project + module?
+```
 
-## 2. Authorship Choice — 5 paths
+### Question 3 (conditional): pull input
 
-| # | Path | Best when |
-|---|---|---|
-| 1 | **Bob drafts** | User has a feature description but no drafts yet. Fastest. |
-| 2 | **User drafts, Bob critiques** | User is a strong requirements writer or has existing drafts to polish. |
-| 3 | **Mixed** | User has a few examples in mind; wants Bob to extrapolate in their voice. |
-| 4 | **Source document** | User has a PDF, Word doc, Jira epic, or pasted text to extract from. |
-| 5 | **DNG module seed** | User wants to revise / clean up an existing DNG module. |
-
-### Branch (1) — Bob drafts
-
-1. Ask for the feature description if not already in context.
-2. Generate 5-15 starter drafts covering the dimensions the user picked in the coverage gate.
-3. Call `lint_requirements_batch` on the starter set.
-4. For each draft scoring <85/100, ask ONE targeted question ("for #3 'Page Load Time' — what's the acceptable p95 ms?").
-5. Iterate.
-
-### Branch (2) — User drafts, Bob critiques
-
-1. Prompt: "Go — paste or type your first draft. I'll lint it and push back on anything weak."
-2. As the user submits each draft:
-   - Lint immediately
-   - Surface findings inline with quotes
-   - Suggest rewrites ONLY when asked
-3. Don't generate drafts on your own in this branch — the user's voice is the point.
-4. Coverage-gap prompting still fires, but suggests categories to add, not text.
-
-### Branch (3) — Mixed
-
-1. Ask for first 1-2 user drafts + feature description.
-2. Generate 3-5 more drafts modeled on user's style + voice. Match their phrasing patterns, vocabulary, granularity.
-3. Mark Bob-generated drafts visibly with 🤖 in the running plan.
-4. User prunes / accepts / rewrites Bob's proposals; Bob critiques the user's originals.
-
-### Branch (4) — Source document
-
-1. Ask what the user has:
-   - Absolute file path on disk (PDF / .docx / .txt / .md / .json)
-   - Pasted content directly in chat
-   - Attached file (warn: Bob's UI may not auto-extract — fall back to path or paste)
-2. Extract:
-   - PDFs → `extract_pdf(file_path=...)`
-   - Text/MD → `read` tool group
-   - Pasted → parse from user's message
-3. Run a **candidate extraction** pass: pull every shall/must/will statement, every numbered list item that reads like a requirement, every section with "Requirements:" / "Acceptance Criteria:" / "User shall…" headers. List candidates with source-line references.
-4. Ask user to confirm which candidates become drafts: "I found 17 candidate reqs in the PDF. Load all 17 as drafts, or do you want to review the list first?"
-5. After confirmation, lint loaded drafts and reprint the running plan. Now you're in critique mode (similar to branch 2).
-6. **Preserve the source link** in each draft's metadata: `source_ref: "<pdf_path> line 42"`.
-
-### Branch (5) — DNG module seed
-
-1. Ask which project + which module. If unclear, call `list_projects(domain='dng')` + `get_modules(...)`.
-2. Call `get_module_requirements(project_identifier, module_identifier)` to pull current reqs.
-3. Load into Plan Mode as drafts, preserving the original DNG ID and URL in metadata. Mark with 🔄 in the running plan.
-4. Lint each — this immediately shows what's weak in the existing module.
-5. Iterate freely.
-6. **CRITICAL**: at push time, drafts with `dng_url` go through `update_requirement`, NOT `create_requirements`. Push Mode reads the metadata and splits CREATES vs UPDATES buckets.
+- **PDF**: call `extract_pdf(file_path=…)`
+- **Pasted text**: parse from user's message
+- **Jira link** (e.g., OMS-29226): call `get_jira_issue` if available; otherwise ask for paste
+- **From scratch**: ask "describe the feature in 1-3 sentences"
 
 ---
 
-## 3. Context Gate — the questions that prevent rework
+## Phase 2 — Decomposition
 
-Run all six in Critical/Important tiers. In Light tier, only ask (a) and (e).
+This is the missing piece from the old Plan Mode. Before drafting **anything**, enumerate candidates and confirm.
 
-**(a) Domain / system context**
+### Decomposition algorithm
 
-> What is this system? (e.g., internal dashboard, medical device firmware, automotive ECU, public SaaS, regulated financial app, defense system, consumer mobile app, B2B integration platform)
+1. Read the input fully (don't skim).
+2. Identify every distinct **behavior** the system shall have — even if implicit.
+3. Identify every **NFR dimension** mentioned or implied (latency, throughput, security, etc.).
+4. Identify every **integration** (external systems, callers, downstream services).
+5. Identify every **business rule**, **override**, or **manual control**.
+6. Identify every **error/edge case** category.
+7. Identify every **deployment / platform constraint** (mentioned tech stack).
+8. Identify every **observability** dimension.
 
-The answer calibrates every push-back. "Internal dashboard" tolerates rougher reqs than "medical device firmware."
+**Each one is a candidate requirement.** Don't bundle.
 
-**(b) Compliance / regulatory standards**
+### What to print
 
-> Any standards apply? Common ones: ISO 26262 (automotive), DO-178C (avionics), IEC 62304 (medical software), FDA 21 CFR Part 820, IEC 61508 (industrial safety), ISO 13485 (medical devices), HIPAA, GDPR, SOC2, PCI-DSS, FedRAMP, WCAG 2.1/2.2, Section 508.
->
-> Pick all that apply, or "none" if internal-only.
+```
+📋 I count <N> candidate requirements in this:
 
-**(c) Internal style guide**
+A. <Category 1 — e.g., Availability Check API> (<count>)
+  A1. <Candidate title>
+  A2. <Candidate title>
+  …
 
-> Does your company have a requirements writing guide / modal verb policy / glossary? If yes, give me the path (PDF / DOCX / markdown) and I'll read it before drafting so the reqs match your house style.
+B. <Category 2 — e.g., Business Overrides> (<count>)
+  B1. <Candidate title>
+  …
 
-If user provides a path, call `extract_pdf` or read the file. Note any **modal verb policy** (some companies use "shall" only, some "must" only), **forbidden words**, **mandatory attributes**, and **ID schemes**.
+[Up to 8-10 categories typical for a meaty story]
 
-**(d) Prior baseline**
+Also from your input:
+- I noticed <linked ticket / tech-stack mention>. <What that tells me
+  and what extra questions it will unlock during drilling>.
+- I see <X> referenced — should I treat it as <interpretation>?
 
-> Is there an existing req set these need to be consistent with? (DNG module, Word doc, JIRA epic.) If yes, give me a pointer.
+Confirm the list, add/rename/remove anything, or just say "go" and I'll
+start drilling A1.
+```
 
-If yes, optionally call `get_module_requirements` to load context (without converting to drafts — that's branch 5).
+### Worked example (the OMS-29226 inventory orchestrator story)
 
-**(e) Stakeholders / reviewers**
+For this Jira input:
+> *"Build a TSC Inventory Orchestrator Service. Real-time availability via Blue Yonder. Manual overrides via Oracle. Resilient fallback via Couchbase. Spring WebFlux + Resilience4j on AKS. Linked: OMS-29227 (minimal latency), OMS-29228 (auto fallback), OMS-29229 (SKU unavailable mark), OMS-29231 (APIM endpoints), OMS-29232 (caller details), OMS-29233 (perf testing)."*
 
-> Who reads and approves these? (engineering, QA, legal, compliance, end-users, suppliers, external auditors)
+The decomposition produces ~35 candidates across 7 categories:
 
-Lock the list into the plan header.
+```
+A. Availability Check API (5)
+  A1. Availability endpoint contract
+  A2. Latency SLA
+  A3. Source-of-truth resolution
+  A4. Response shape
+  A5. Load + concurrency handling
 
-**(f) Safety / security classification** — only if compliance was non-empty
+B. Business Overrides (8)
+  B1. Override CRUD operations
+  B2. Override scope (SKU / region / category)
+  B3. Override RBAC and authorization
+  B4. Override audit trail
+  B5. Concurrent override conflict resolution
+  B6. Override validation rules
+  B7. Override TTL and expiry
+  B8. Override propagation policy
 
-Sub-questions depend on the picked standards:
+C. Resilient Fallback (7)
+  C1. Circuit breaker config (Resilience4j)
+  C2. Fallback trigger conditions
+  C3. Snapshot service contract (Couchbase RIS)
+  C4. Snapshot freshness SLA when in fallback
+  C5. Recovery semantics
+  C6. Fallback response labeling (stale flag)
+  C7. Operational alerting on fallback duration
 
-- Safety standards → ASIL/SIL/DAL level?
-- Security/privacy regs → data classification (public/internal/confidential/restricted)?
-- HIPAA/GDPR → PII / PHI / financial data in scope?
+D. Integration / APIM (5)
+  D1. APIM endpoint per caller (FE / Direct Sales / COM)
+  D2. Auth per caller
+  D3. Rate limits per caller
+  D4. Versioning per caller
+  D5. Error contract
+
+E. Performance NFRs (5)
+  E1. Peak QPS target
+  E2. p50/p95/p99 latency
+  E3. Concurrent connection ceiling
+  E4. Backpressure under load (WebFlux)
+  E5. Graceful degradation under spike
+
+F. AKS Deployment (3)
+  F1. Liveness/readiness probes
+  F2. HPA scaling triggers
+  F3. Resource limits + secrets
+
+G. Observability (2)
+  G1. Metrics, traces, logs
+  G2. Alerting thresholds
+```
+
+Then ask the user to confirm before drilling.
 
 ---
 
-## 4. Discipline Interview — the original 5 gates
+## Phase 3 — Deep-drill loop
 
-Run after the Context Gate. Each one is a real stop.
+For each candidate in order, run STEPS 3a → 3g:
 
-| Gate | Question |
+### 3a — Print the header
+
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📝 Req <i> of <N> — <Candidate title>
+Category: <detected category>
+Hints from input: <tech-stack + linked-artifact hints>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+
+### 3b — Apply the elicitation template (in one batched turn)
+
+Ask **all** template questions for this candidate in **one** turn. User answers in one paste. This is the difference between deep-drill (efficient, focused) and old Plan Mode (chatty, generic).
+
+### 3c — Follow-up if needed
+
+If user's answers leave gaps, ask a smaller batch (2-4 Qs) once more. **Saturation rule**: if a second follow-up batch doesn't change the draft, lock with current answers and move on. No infinite drilling.
+
+### 3d — Draft strictly
+
+- **Modal**: "shall" only. Reject "should" / "may" / "will eventually" / "ought to"
+- **Quantified**: every number has units; performance NFRs have percentile + load envelope
+- **Testable**: every claim has a verification method (Test / Analysis / Inspection / Demonstration)
+- **Atomic**: one obligation per requirement; split compound shalls
+- **Implementation-independent**: WHAT not HOW (move tech specifics to design)
+
+### 3e — Lint + surface findings
+
+Call `lint_requirements_batch` on the draft. Print inline:
+
+```
+✅ Req <i> drafted — score <X>/100:
+
+> <full requirement text>
+
+[If score < 85:]
+Findings:
+- 🔴 <rule>: <quote> — <fix>
+- 🟡 <rule>: <quote> — <fix>
+
+Refine (1 follow-up Q max), or accept as-is?
+```
+
+### 3f — Lock + reprint plan
+
+Add to running plan with full metadata. Reprint the plan footer.
+
+### 3g — Transition prompt
+
+```
+Moving to Req <i+1>: <next candidate title>. Confirm next, pause with
+/save, or jump to a different candidate by number.
+```
+
+---
+
+## Elicitation templates (one per category)
+
+Each template is a question battery. Bob picks the right template by detecting the candidate's category from its title + input context. Ask all listed questions in ONE batched turn.
+
+### Template A — FUNCTIONAL API
+
+```
+1. Operation shape: single-record, batch, streaming, or all three?
+2. HTTP contract: method + path? Query params vs body? REST only, or
+   also gRPC / GraphQL?
+3. Request shape (what the caller sends — fields, validation rules)?
+4. Response shape (success fields, error fields, status codes)?
+5. Auth model: mTLS, OAuth client-creds, API key, JWT?
+6. Versioning: URL (/v1/), header, content negotiation?
+7. Idempotency: is repeat-safe? Idempotency-Key header?
+8. Pagination / batch limits?
+9. (Critical tier only) — backwards compatibility expectations?
+10. (Critical tier only) — deprecation policy?
+```
+
+### Template B — PERFORMANCE NFR
+
+```
+1. Load envelope: peak QPS (e.g., Black Friday)? Sustained average?
+   Growth rate?
+2. Latency targets: p50, p95, p99 thresholds?
+3. Measurement point: ingress, service entry, end-to-end including
+   downstream?
+4. Latency budget split: how much for this service vs downstream
+   calls vs serialization?
+5. Degradation policy when latency creeps over p95: alert, throttle,
+   shed load, trigger fallback?
+6. Cold-start tolerance (acceptable latency on a freshly scheduled
+   pod)?
+7. (Critical tier) — what's the worst-case acceptable latency
+   under burst spike before user impact?
+8. (Critical tier) — capacity planning growth horizon (2x in 6 months?
+   10x in 12?)
+```
+
+### Template C — RESILIENCE
+
+```
+1. Failure modes catalog: what can fail (downstream timeout, exception,
+   partial response, network partition, slow response)?
+2. Circuit breaker config: failure rate threshold? Sliding window
+   (count- vs time-based, size)? Minimum calls before evaluation?
+   Open-state duration? Half-open permitted calls?
+3. Retry policy: count, base delay, backoff strategy, jitter, max
+   total time?
+4. Bulkhead limits: concurrent calls, queue size?
+5. Fallback semantics: cached response, default value, error response,
+   degraded mode?
+6. Recovery: when downstream returns, resume immediately or gradual
+   warm-up?
+7. (Critical tier) — fault tolerance time interval before user-visible
+   impact?
+8. (Critical tier) — chaos / failure injection requirements?
+```
+
+### Template D — DATA / STATE
+
+```
+1. Source of truth: which system owns the canonical value?
+2. Consistency model: strong, eventual, read-your-writes,
+   monotonic?
+3. Freshness SLA: how stale can a cached/replicated value be?
+4. Conflict resolution: last-write-wins, version-vector, manual
+   reconciliation?
+5. Durability requirements: replication factor, fsync semantics,
+   retention?
+6. (Critical tier) — concurrency: optimistic (ETag/version) or
+   pessimistic locking?
+7. (Critical tier) — data classification (public / internal /
+   confidential / restricted / PHI / PII)?
+8. (Critical tier) — encryption at rest + in transit specifics?
+```
+
+### Template E — INTEGRATION
+
+```
+1. Caller list: who calls this (Front End, Direct Sales, COM,
+   third-party)?
+2. SLA differentiation: do different callers get different SLAs?
+3. Rate limits per caller: RPS quotas?
+4. Auth per caller: shared cert / OAuth client / API key — different
+   per caller?
+5. Versioning per caller: can different callers be on different API
+   versions?
+6. Error contract: shared error shape across callers, or
+   per-caller customization?
+7. (Critical tier) — partner / external system SLAs that affect our
+   SLA?
+8. (Critical tier) — contractual obligations (SLO penalties, uptime
+   guarantees)?
+```
+
+### Template F — SECURITY / RBAC
+
+```
+1. Roles: what roles can perform this? Hierarchy among them?
+2. Permissions: read-only / read-write / admin distinctions?
+3. Audit: what gets logged on each action (who, what, when, before/
+   after state)?
+4. Audit retention: how long?
+5. Encryption: at-rest + in-transit specifics?
+6. Threat model: what's the adversary? Insider, external, both?
+7. Secret management: where do credentials live? Rotation cadence?
+8. (Critical tier) — SAST/DAST/penetration testing requirements?
+9. (Critical tier) — secure development lifecycle gates?
+```
+
+### Template G — OBSERVABILITY
+
+```
+1. Metrics: what timer + counter + gauge measurements are required?
+   (latency, error rate, request rate, queue depth)
+2. Distributed tracing: spans, propagation, sampling rate?
+3. Structured logging: what events at what levels (debug/info/warn/
+   error)?
+4. Alert thresholds: what triggers a page? What triggers a ticket?
+5. SLI/SLO: what's the SLI definition? SLO target? Error budget?
+6. (Critical tier) — runbook completeness expectations?
+7. (Critical tier) — on-call rotation and escalation requirements?
+```
+
+### Template H — DEPLOYMENT / PLATFORM
+
+```
+1. Liveness probe: what makes a pod alive? Endpoint + interval +
+   threshold?
+2. Readiness probe: when can a pod serve traffic? Endpoint + interval
+   + threshold?
+3. HPA triggers: scale on CPU? RPS? Custom metric? Min/max replicas?
+4. Resource limits: CPU + memory requests + limits per pod?
+5. Secret management: which secrets, from where, how injected?
+6. Regions / failover: single-region or multi-region?
+7. Deployment strategy: rolling, blue/green, canary?
+8. (Critical tier) — disaster recovery RPO + RTO?
+9. (Critical tier) — chaos engineering / failure injection?
+```
+
+### Template I — UI
+
+```
+1. States: what visual states does the user see (loading, success,
+   error, empty)?
+2. Edge cases: what if data is malformed, missing, very large?
+3. Error display: how are errors surfaced? Toast, inline, page-level?
+4. Accessibility: WCAG conformance level? Keyboard nav? Screen reader?
+5. Color contrast specifics?
+6. Mobile / desktop / both?
+7. Localization: languages, time zones, currencies, date formats?
+8. (Critical tier) — assistive tech matrix?
+```
+
+### Template J — VALIDATION
+
+```
+1. Input constraints: type, length, range, format (regex, schema)?
+2. Boundary behavior: at zero / max / negative / just-below-max /
+   just-above-min?
+3. Error response for invalid input: status code, error body, retry
+   guidance?
+4. Sanitization: how is untrusted input cleaned before processing?
+5. Idempotency: same invalid input twice — same response?
+6. (Critical tier) — fuzzing / property-based testing requirements?
+```
+
+### Template K — OVERRIDE / MANUAL CONTROL
+
+```
+1. Scope: what entity does an override apply to (single record,
+   category, region, global)?
+2. RBAC: who can create / read / update / delete an override?
+3. Conflict resolution: two overrides on same entity near-simultaneously
+   — last-write-wins, role priority, reject-second?
+4. TTL: time-bounded or permanent? Default? Maximum?
+5. Audit trail: what gets logged?
+6. Propagation: does the override flow back to upstream systems or
+   stay local?
+7. Validation: what bounds prevent invalid overrides?
+8. Surfacing: how are overrides flagged to downstream consumers?
+9. (Critical tier) — approval workflow before override takes effect?
+```
+
+---
+
+## Tech-stack hint banks
+
+When the input mentions a technology, unlock its question bank during drilling for relevant candidates:
+
+| Tech mentioned | Unlocks |
 |---|---|
-| Methodology | Agile / SAFe / Waterfall / hybrid? |
-| Decomposition | Single-tier or business → stakeholder → system? |
-| Artifact types | **REQUIREMENTS ONLY whitelist** (see below). Do not show the full `get_artifact_types` list — Plan Mode is constrained. |
-| Target | Which project? Which module (existing or new)? |
-| Coverage | Which dimensions? functional, performance, security, accessibility, error paths, observability, capacity, localization, … |
-
-### Artifact types — the hard whitelist
-
-Plan Mode produces statements of what the system **shall** do (or shall be). Nothing else. Even if the DNG project exposes 27 artifact types, you only draft these three:
-
-| Type | Format | Example |
-|---|---|---|
-| **System Requirement** | "The system shall…" | "The system shall convert temperatures from Celsius to Fahrenheit with ±0.01°C accuracy." |
-| **Non-Functional Requirement** | "<quality> shall be…" | "Response time shall be ≤ 200 ms p95 under nominal load." |
-| **Stakeholder Requirement** | "<role> shall be able to…" | "Regulators shall be able to audit all conversions for 7 years." |
-
-Two auxiliary types are allowed only for structure, never as standalone drafts:
-
-- **Heading** — organizational scaffolding inside a module ("3.1 Performance Requirements")
-- **Term** — glossary entries, triggered only when the glossary lint suggests one
-
-### Refused outside this whitelist
-
-If the user asks for any of the following, refuse politely and redirect:
-
-| User asks for | Refuse — reason | Redirect to |
-|---|---|---|
-| User stories ("As a... I want...") | EWM work item, not a requirement | `/import-work-item` or `/build-from-existing` |
-| Epics, Capabilities | EWM work items | `/import-work-item` |
-| Tasks | EWM work items | `/build-from-existing` |
-| Defects, Milestones | EWM work items | `create_defect` directly after reqs are pushed |
-| Test cases, Test plans, TERs | ETM artifacts | ETM creation flow after reqs are pushed |
-| Scenarios (Act, Scene, Lifecycle) | Usage walkthroughs, not requirements | `/build-from-existing` if part of a SAFe stack |
-| SAFe Vision, Themes, Value Streams, Portfolio Canvas, TOWS, SWOT, Lean Business Case, Solution Intent, Solution Context, Program | Planning artifacts, not requirements | `/build-from-existing` or `/build-new-project` |
-| Wireframes, Free-Form Diagrams, Roles, Supporting Resources, Standards | Design / reference artifacts | Out of scope for Plan Mode |
-
-Standard refusal:
-
-> That's not a requirement — Plan Mode is requirements-only. For [stories/tasks/tests/SAFe artifacts], use [appropriate flow]. We'll finish the requirements set here first.
-
-### Coverage gate extension by compliance
-
-If compliance was named, **extend the Coverage gate** with standard-mandated dimensions:
-
-- ISO 26262 → hazard analysis, safety mechanisms, fault tolerance, diagnostic coverage
-- IEC 62304 → safety classification (A/B/C), SOUP identification, anomaly handling
-- DO-178C → DAL, MC/DC coverage targets, tool qualification
-- HIPAA → access control, audit logging, encryption at rest, breach notification
-- GDPR → lawful basis, data subject rights, DPIA, cross-border transfer
-- WCAG → perceivable / operable / understandable / robust + AT matrix
-- SOC2 → trust services criteria (Security / Availability / Processing Integrity / Confidentiality / Privacy)
-- PCI-DSS → cardholder data environment scope, tokenization, network segmentation
+| **Spring WebFlux** / reactive | backpressure, Mono/Flux semantics, scheduler tuning |
+| **Resilience4j** | circuit breaker (failure rate, sliding window, half-open), retry, bulkhead, time limiter — make each a specific NFR |
+| **Couchbase** / Redis / cache | consistency model, TTL, eviction policy, warm-up strategy, durability |
+| **Oracle** / Postgres / RDBMS | transaction isolation, indexing strategy, connection pooling, schema migration |
+| **Kafka** / RabbitMQ / queue | ordering guarantees, idempotency, DLQ handling, replay capability, consumer groups |
+| **AKS** / EKS / GKE / K8s | liveness/readiness probes, HPA triggers, resource limits, secret injection, node affinity |
+| **APIM** / Apigee / Kong | endpoint structure, rate limit tier, auth mechanism, versioning, throttling response |
+| **External SaaS** (Blue Yonder, Salesforce, etc.) | their SLA, downtime handling, their rate limits, retry/backoff respect |
+| **Spring Boot** / FastAPI / Express | standard NFRs (no extra unlock) |
+| **WCAG** / accessibility | full template I expanded |
+| **HIPAA** / PHI / PII | data classification, audit retention, breach notification, encryption specifics |
+| **GDPR** | lawful basis, data subject rights, DPIA, cross-border transfer |
+| **PCI-DSS** | CDE scope, tokenization, network segmentation |
 
 ---
 
-## 5. Domain Question Banks
+## Running plan format
 
-Unlock these per compliance answer. Ask all questions in the bank, but **batch them in one turn** — user answers in one paste, not 8 round-trips.
-
-### ISO 26262 (automotive functional safety)
-- ASIL classification (QM / A / B / C / D)?
-- Item definition reference / system boundary?
-- Hazard analysis & risk assessment (HARA) status?
-- Safety goals identified?
-- Safe state defined?
-- Fault tolerance time interval?
-- Diagnostic coverage targets?
-- Dependent failure analysis done?
-
-### IEC 62304 (medical device software)
-- Software safety classification (A / B / C)?
-- SOUP identification (Software Of Unknown Provenance)?
-- Risk control measures upstream of this software?
-- Anomaly handling strategy?
-- Verification activities planned?
-
-### DO-178C (avionics)
-- DAL (Design Assurance Level A-E)?
-- PSAC (Plan for Software Aspects of Certification) reference?
-- Tool qualification needs?
-- MC/DC coverage targets?
-- Deactivated code policy?
-
-### HIPAA
-- PHI in scope? Data classification?
-- Required disclosures / minimum necessary?
-- Audit log retention period?
-- Breach notification path?
-- BAA in place with downstream vendors?
-
-### GDPR
-- Lawful basis for processing?
-- Data subject rights (access, deletion, portability, etc.)?
-- DPIA required?
-- Cross-border transfer mechanism?
-- Data Protection Officer assigned?
-
-### WCAG 2.1/2.2
-- Conformance level (A / AA / AAA)?
-- Assistive tech matrix (screen readers, switch devices, magnifiers)?
-- Mobile + desktop both in scope?
-- Captions / transcripts required?
-- Color contrast minimum?
-
-### SOC2
-- Trust services criteria (Security / Availability / Processing Integrity / Confidentiality / Privacy)?
-- Type 1 (point-in-time) or Type 2 (period)?
-- Control owners identified?
-- CUEC (Complementary User Entity Controls) documented?
-
-### PCI-DSS
-- Cardholder data environment scope?
-- Tokenization / encryption strategy?
-- Network segmentation in place?
-- Merchant level?
-
-### Other / not listed
-
-If the user names a standard not in the banks above, ask them to point at the relevant clause and treat that as the question source. Don't fake expertise you don't have.
-
----
-
-## 6. "What Am I Missing?" self-prompt
-
-Before declaring the interview complete, Bob renders this visibly to the user:
-
-> 🔍 **Self-check:** "What would a senior systems engineer working on **<domain>** with **<compliance standards>**, drafting requirements reviewed by **<stakeholders>**, ask that I haven't yet?"
->
-> Candidate questions I'd add:
-> 1. <first candidate>
-> 2. <second candidate>
-> 3. <third candidate>
->
-> Want me to ask any of these before we start drafting?
-
-User picks any / all / none. This forces Bob to actually search domain knowledge instead of declaring closure prematurely. Highest-yield anti-shortcut measure in the playbook.
-
----
-
-## 7. Authorship Branch execution
-
-See section 2 above for the per-branch playbook.
-
----
-
-## 8. Iteration — what every turn looks like
-
-After drafting begins:
-
-### Per-turn structure
-
-1. Acknowledge the user's input briefly.
-2. Make whatever change to the plan the user asked for (add / edit / remove / rewrite).
-3. Call `lint_requirements_batch` on touched drafts (or full set for sweeping changes).
-4. Surface findings inline:
-   - 🔴 High — must address before push (broken modal, missing units, untestable)
-   - 🟡 Medium — should address (vague language, weak modal)
-   - 🟢 Low — nice-to-have
-5. Run extended per-req checks (see below) on changed drafts.
-6. Run contradiction detection across full plan.
-7. Reprint the running plan footer.
-
-### Running plan format
+After every locked requirement, reprint the plan at the END of the reply:
 
 ```
-### 📋 Current plan (4 drafts · avg 84/100 · 1 🔴 outstanding · 0 ⚠️ conflicts)
-Rigor: Critical · Authorship: Mixed · Methodology: Agile
-Domain: medical infusion pump firmware
-Compliance: IEC 62304 Class B, FDA 21 CFR Part 820
-Style guide: /Users/me/co-style.pdf · Stakeholders: SW eng, QA, regulatory, clinical
-Target: WatsonX AI POC > Temperature Converter
+### 📋 Plan — <feature name> (<done>/<total> · avg <score>/100)
+Rigor: Critical · Domain: e-commerce backend · Compliance: none
+Target: Tractor Supply Agentic Engineering > OMS-29226
 
-1. [System Requirement · 92/100] Temperature input field shall accept values from -273.15 to 1000 °C.
-2. [System Requirement · 78/100] Conversion shall complete within 200 ms p95.
-3. [Non-Functional · 65/100 🔴] Page load shall be fast. ← weak modal + missing units
-4. [System Requirement · 100/100 🤖] Result display shall round to 2 decimal places.
+A. Availability Check API (5)
+  A1. ✅ Availability endpoint contract — 95/100
+  A2. ✅ Latency SLA — 92/100
+  A3. ⏳ next: Source-of-truth resolution
+  A4. ⏸ Response shape
+  A5. ⏸ Load + concurrency handling
+
+B. Business Overrides (8) ⏸
+C. Resilient Fallback (7) ⏸
+D. Integration / APIM (5) ⏸
+E. Performance NFRs (5) ⏸
+F. AKS Deployment (3) ⏸
+G. Observability (2) ⏸
 ```
 
-Annotations:
-- 🤖 — Bob-generated draft
-- 🔄 — seeded from existing DNG module
-- 🔴 — has a high finding
-- 🟡 — has a medium finding
-- ⚠️ — involved in a possible cross-req conflict
-
-### Push-back triggers
-
-| Smell | Push-back |
-|---|---|
-| Vague language ("user-friendly", "fast", "robust") | "What does that mean? Time? WCAG level? Number of clicks? Pick one and quantify." |
-| Compound shalls | "This has 3 obligations joined by 'and'. Split into 3 reqs so we can trace, test, update independently." |
-| Implementation leakage ("via REST API") | "That's a design decision. The req should say WHAT, not HOW. Move REST to architecture." |
-| Missing units | "'Within 500' — 500 what? ms? business days? Add the unit." |
-| Future tense ("will eventually") | "That's a plan, not a requirement. Schedule it or remove it." |
-| Weak modals ("should") | "Recommendation, not requirement. 'Shall' if binding; otherwise design rationale." |
-| Untestable | "How would you write a test for that? If you can't, the req is broken." |
-
-### Extended per-req lint checks
-
-Beyond standard pattern lint, run these on every draft:
-
-| Check | Question Bob asks |
-|---|---|
-| **Verifiability** | "How would this be verified — Test, Analysis, Inspection, or Demonstration?" |
-| **Style guide conformance** | Lint against modal verb policy / forbidden words from doc loaded in 3c |
-| **Compliance wording** | Check standard-specific conventions (ISO 26262 §6.4 mandatory shall, etc.) |
-| **Boundary values** | "Behavior at 0 / max / negative / just-below-max?" |
-| **Failure modes** | "What happens with invalid input / downstream failure / timeout?" |
-| **Concurrency** | "What if two users do this simultaneously? Conflict resolution rule?" |
-| **Observability** | "How will we know in production this req is being satisfied? Metrics / logs / alerts?" |
-| **Negation test** | State the negation. If the negation is also acceptable, the req isn't binding. |
-| **Show don't tell** | For abstract terms, demand a concrete example or measurable proxy. |
-| **Glossary** | Every domain noun-phrase not previously defined → suggest a Term artifact. |
-| **Cross-team** | If req implies another team's work, ask if they're aware. |
-
-### Contradiction detection
-
-After each lint pass, scan all drafts pairwise for conflicts: same subject + contradictory predicates (response times that don't fit, mutually exclusive states, encryption ON/OFF disagreements). Surface in plan footer:
-
-> ⚠️ **Possible conflict:** #3 says "response within 100 ms"; #12 implies a sync that may take 500 ms. Reconcile?
-
-### Reviewer personas — Critical/Important tiers
-
-After drafting each req, silently review through 4 personas and surface any sharp questions inline:
-
-- **Security reviewer**: "What's the attack surface? What's the threat model?"
-- **UX reviewer**: "What does the user see? Is the failure path obvious?"
-- **Compliance auditor**: "Which clause does this satisfy? Where's the evidence?"
-- **Operations engineer**: "What does this look like in monitoring? What alerts on it?"
+Icons:
+- ✅ locked
+- ⏳ next up
+- ⏸ pending
+- 🔴 has a high lint finding outstanding
+- 🤖 Bob-drafted (vs user-drafted)
+- 🔄 seeded from existing DNG req
 
 ---
 
-## 9. Wrapping — out-of-scope + saturation
+## Phase 4 — Wrap
 
-### Out-of-scope prompt — once per session, near end
+When the last candidate is locked, run all three:
 
-> Before we wrap, anything we should EXPLICITLY mark as out-of-scope? Those are as valuable as positive reqs — they prevent scope creep and clarify intent for reviewers.
+### 4a. Out-of-scope prompt
+
+```
+All <N> reqs locked. Before push, anything to explicitly mark as
+out-of-scope? Those are as valuable as positive reqs — they prevent
+scope creep and clarify intent for reviewers.
+```
 
 If user lists items, add them as drafts marked `[Out-of-Scope]`.
 
-### Auto-detect interview saturation
+### 4b. Contradiction check
 
-Track each answer's effect on the running plan. If the last 3 consecutive answers added zero new constraints, lint findings, or coverage dimensions, the interview has saturated. Print:
+Pairwise scan all locked reqs for conflicts: same subject + contradictory predicates (latency targets that conflict, mutually exclusive states, encryption ON/OFF disagreements, capacity claims that don't match load envelope).
 
-> Last 3 answers didn't change the plan — looks like we've covered the key dimensions for this scope. Ready to start drafting, or anything you want to add?
+Surface in plan footer:
 
-User confirms or extends. Saturation detection beats fixed counts.
+```
+⚠️ Possible conflict: A2 says p95 latency ≤ 200 ms; C3 implies snapshot
+fetch may take 350 ms when BY is degraded. Reconcile?
+```
 
----
+### 4c. Coverage check
 
-## 10. Quality bar — "ready to push"
+Did we miss any category from the original decomposition? Did any compliance dimension go unaddressed? Surface gaps:
 
-A plan is ready when:
+```
+🔍 Coverage check: I decomposed 35 candidates, we locked 33. The other
+2 (B7 Override TTL, D5 Error Contract) were skipped — intentional or
+revisit?
+```
 
-- Every draft scores **≥ 75/100** on `lint_requirements_batch`
-- **Zero 🔴 high findings** remain
-- All rigor-tier-relevant gates are filled (Critical = all 14; Important = ~10; Light = ~6)
-- User has **explicitly approved** with "push", "ship it", or `/push`
+### 4d. Ready-for-push criteria
 
-If the user tries to push before the bar is met, list outstanding items:
+All true:
+- Every locked req scores ≥ 75/100
+- Zero 🔴 findings outstanding
+- All decomposition candidates resolved (locked, marked out-of-scope, or explicitly deferred)
+- User says `/push` / "ship it" / "send to DNG"
 
-> Holding off on push — outstanding:
-> - Req #3 has a 🔴 finding (missing units)
-> - Coverage gap: no error-path reqs in this set
-> - Style guide check pending
->
-> Want to fix these now, or `/push --force` to override and ship anyway?
-
-If the user `--force`s or says "ship it anyway", log the override in the plan header:
-
-> ⚠️ Override: shipped with 1 🔴 finding outstanding at user request
-
-Then hand off to Push Mode.
+If user `/push`es early, refuse with a one-liner listing what's outstanding, then offer `/push --force` to override.
 
 ---
 
@@ -443,90 +524,84 @@ Then hand off to Push Mode.
 | Command | Behavior |
 |---|---|
 | `/view` | Reprint the current plan |
-| `/save` | Print the plan as a JSON code block for paste-back |
-| `/resume` | Followed by JSON paste, restore plan state, skip interview |
+| `/save` | Print plan as JSON for paste-back next session |
+| `/resume <JSON>` | Restore plan state, skip Phases 1-2, jump back into drill loop |
 | `/discard` | Confirm once, then drop the plan |
-| `/upgrade` | Bump rigor tier (Light → Important → Critical) |
-| `/downgrade` | Drop rigor tier |
-| `/push` | Hand off to Push Mode |
+| `/upgrade` / `/downgrade` | Move rigor tier (recalibrates Qs per candidate from this point on) |
+| `/jump <N>` | Jump to a specific candidate by number (skip ahead or revisit) |
+| `/skip` | Mark current candidate as deferred and move to next |
+| `/push` | Hand off to 📤 Push Requirements mode |
+| `/push --force` | Hand off with overrides logged |
 
 ### `/save` schema
 
 ```json
 {
   "mode_state": "plan",
-  "version": 1,
+  "version": 2,
   "rigor": "Critical",
-  "authorship": "mixed",
-  "methodology": "Agile",
-  "decomposition": "single-tier",
-  "artifact_types": ["System Requirement", "Non-Functional Requirement"],
-  "target_project": "WatsonX AI POC (Requirements)",
-  "target_module": "Temperature Converter System Requirements",
-  "domain": "medical infusion pump firmware",
-  "compliance": ["IEC 62304 Class B", "FDA 21 CFR Part 820"],
-  "style_guide": "/Users/me/co-style.pdf",
-  "stakeholders": ["SW eng", "QA", "regulatory", "clinical"],
-  "safety_class": "Class B",
-  "coverage_dimensions": ["functional", "performance", "safety", "observability"],
-  "domain_bank_answers": { "...": "..." },
-  "drafts": [
-    {
-      "title": "...",
-      "type": "System Requirement",
-      "text": "...",
-      "lint_score": 92,
-      "lint_findings": [],
-      "verification_method": "Test",
-      "compliance_refs": ["IEC 62304 §5.3.3"],
-      "bob_generated": false,
-      "dng_url": null,
-      "source_ref": null
-    }
-  ],
+  "feature_name": "TSC Inventory Orchestrator",
+  "domain": "e-commerce backend",
+  "compliance": [],
+  "stakeholders": ["SW eng", "QA", "arch"],
+  "target_project": "Tractor Supply Agentic Engineering - Requirements",
+  "target_module": "OMS-29226 - TSC Inventory Orchestrator Service",
+  "decomposition": {
+    "categories": [
+      {"id": "A", "name": "Availability Check API", "candidates": [
+        {"id": "A1", "title": "...", "status": "locked", "lint_score": 95,
+         "type": "System Requirement", "text": "..."},
+        ...
+      ]},
+      ...
+    ]
+  },
   "out_of_scope": ["..."],
   "overrides": []
 }
 ```
 
-### `/resume` behavior
-
-When the user pastes the JSON back with `/resume` or "resume this plan":
-
-1. Parse the JSON. Validate it has at minimum: methodology, decomposition, target, drafts.
-2. Reprint the running plan immediately.
-3. Skip the discipline interview — already answered.
-4. Ask: "Resumed plan with N drafts. Want to keep iterating, or is this ready for push?"
-5. If any draft metadata is stale (lint scores, etc.), re-derive by re-linting.
+When user pastes JSON back with `/resume`:
+1. Parse + validate (rigor, target, decomposition required)
+2. Reprint the plan immediately
+3. Skip Phases 1-2 (already done)
+4. Resume the drill loop at the first `⏸` candidate
+5. If lint scores are stale, re-derive on next access
 
 ---
 
-## Refuse writes — politely but firmly
+## Push-back triggers (apply continuously)
 
-If user asks to create/push/update DNG in Plan Mode, reply:
-
-> Not in Plan Mode — that's what 📤 Push Requirements mode is for. Want to switch? Current plan: **N drafts**, avg X/100, Y findings outstanding. I'd recommend tightening the 🔴 reqs before push.
-
-If the user says "force it" or "do it anyway" — STILL refuse. The mode boundary is not negotiable. Tell them to `/push` to swap mode.
+| Smell | Bob's response |
+|---|---|
+| Vague language ("user-friendly", "fast", "robust", "modern") | "Quantify. What does that mean in numbers + units?" |
+| Compound shalls (A and B and C) | "Split — three obligations, three reqs" |
+| Implementation leakage ("via REST", "using Couchbase") | "That's design. The req says WHAT not HOW. Move implementation to the design doc." |
+| Missing units ("within 500") | "500 what — ms? seconds? business days?" |
+| Future tense / aspiration ("will eventually") | "Schedule it explicitly or remove it" |
+| Weak modals ("should", "may", "ought") | "Shall if binding, otherwise design rationale" |
+| Untestable | "How would you write a test? If you can't, the req is broken." |
 
 ---
 
-## Resist pressure to skip — ONCE per request
+## Refuse writes — Plan Mode never touches DNG
 
-User may say "just generate it" / "skip the interview" / "I don't have time." Respond once:
+If user asks to `create_requirements` / `update_requirement` / `create_module` / etc. while in Plan Mode:
 
-> I hear you — Plan Mode's interview is heavy on purpose. Every question we skip becomes a rewrite later, and some become compliance gaps at audit time. The checklist has **N items open**. Want me to fast-path with reasonable defaults for **[list specific gates]**, or push through them now?
+```
+Not in Plan Mode — that's what 📤 Push Requirements mode is for.
+Current plan: <N> drafts, avg <X>/100, <Y> outstanding. Want me to
+hand off to push?
+```
 
-If user confirms fast-path: log `⚠️ Override: N gates fast-pathed at user request` in plan header and proceed with defaults.
-
-**Don't push back twice.** The user is in charge; your job is to make the cost visible, not to block.
+Even with "force" phrasing — refuse. The mode boundary is non-negotiable. The user can `/push` to swap modes.
 
 ---
 
 ## What Plan Mode is NOT for
 
-- Reading existing DNG reqs without modifying → just use `get_module_requirements` directly
-- Editing already-pushed reqs → use `update_requirement` directly (a future "edit mode" might pull DNG reqs INTO a plan; not today, unless via authorship branch 5)
-- Tasks, test cases, defects → Plan Mode is requirements-only
-- Single requirement the user is sure about → use the live create flow
-- Elicitation from an SME in a workshop → not yet; future enhancement
+- Reading existing DNG reqs without modifying → use `get_module_requirements` directly
+- Editing already-pushed reqs → use the live `update_requirement` flow (or `/plan` then seed branch which is in custom_modes)
+- Tasks, test cases, defects → out of Plan Mode scope (see hard scope boundary in `customInstructions`)
+- Single trivial req the user is certain about → just use the live create flow, no Plan Mode needed
+- Workshop elicitation with an SME present → future enhancement (Elicitation sub-mode)
