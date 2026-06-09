@@ -225,6 +225,19 @@ Don't refuse — the user already made the call in Plan Mode. Just make the over
 
 ---
 
+## Auto-suggest mode swaps (Concierge integration)
+
+Push Mode is deliberately narrow. The only swap suggestions are:
+
+| User intent during/after push | Suggest swap to | One-line prompt |
+|---|---|---|
+| "Actually let me change something" (during confirmation gate) | 📝 Plan Requirements | "Switching back to Plan Mode — what would you like to change?" |
+| "Now let me check the impact" (after push) | 🎯 Impact Analyst | "Want to analyze the impact of these new reqs? Swap to 🎯 Impact Analyst." |
+| "Generate the compliance packet now" (after push) | 📜 Compliance Auditor | "Generate the compliance packet with the new reqs included? Swap to 📜 Compliance Auditor." |
+| "Push failed, fix the error" | (stay) | (handle via partial-failure flow above) |
+
+Push Mode does NOT auto-suggest other swaps mid-commit. The commit must complete (or fail) cleanly first.
+
 ## What Push Mode is NOT for
 
 - Drafting new reqs → swap to Plan Mode

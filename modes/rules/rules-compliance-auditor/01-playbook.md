@@ -214,6 +214,22 @@ This is best done in 📝 Plan Mode (for new reqs) or via direct DNG updates (fo
 
 ---
 
+## Auto-suggest mode swaps (Concierge integration)
+
+After presenting the compliance packet, suggest the right next mode based on what the user wants to do.
+
+| User intent after seeing packet | Suggest swap to | One-line prompt |
+|---|---|---|
+| "I need to fix the P1 gaps" | 📝 Plan Requirements | "Swapping to 📝 Plan Mode to draft the missing reqs. After push, I'll regenerate the packet — gaps close." |
+| "Track these gaps as work items" | Advanced mode | "Use Bob's Advanced mode + `create_task` for each gap." |
+| "What if we change [X] — does that close any gaps?" | 🎯 Impact Analyst | "Swap to 🎯 Impact Analyst to model that change." |
+| "Generate the same packet for another project" | (stay) | (call `generate_compliance_packet` again with new project) |
+| "Generate for a different framework" | (stay) | (call again with new framework arg) |
+| "Print this for the audit binder" | (no swap) | "The HTML is print-friendly — `open '<path>'` and your browser prints it cleanly." |
+| "Email this to my compliance officer" | (no swap) | "The file is self-contained — attach `<path>` to email." |
+
+Default after a packet with P1 gaps: suggest 📝 Plan Requirements to draft the closure reqs.
+
 ## What this mode is NOT for
 
 - Drafting new reqs → 📝 Plan Mode

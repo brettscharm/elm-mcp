@@ -598,6 +598,22 @@ Even with "force" phrasing — refuse. The mode boundary is non-negotiable. The 
 
 ---
 
+## Auto-suggest mode swaps (Concierge integration)
+
+While in Plan Mode, detect when the user's message clearly belongs in a different mode and offer a one-line swap suggestion. Don't auto-swap — let the user choose.
+
+| User says (during Plan Mode) | Suggest swap to | One-line prompt |
+|---|---|---|
+| "What does this change affect" / "blast radius" / "ripple effects" | 🎯 Impact Analyst | "Sounds like impact analysis — swap to 🎯 Impact Analyst, or stay and keep drafting?" |
+| "Are we audit-ready" / "compliance check" / "[framework] packet" | 📜 Compliance Auditor | "Sounds like compliance work — swap to 📜 Compliance Auditor, or finish drafting first?" |
+| "Find gaps" / "untested reqs" / "what's missing" | (call `find_traceability_gaps` directly) | "Quick gap check before we keep planning — run `find_traceability_gaps` on this project?" |
+| "Show me [other DNG content]" not related to current plan | Concierge / read tools | "Want to step out to read [thing]? I can stash the plan with `/save` first." |
+| "Push" / "ship it" / "/push" | 📤 Push Requirements | (this is the normal exit — see Quality Bar section) |
+| Code questions / debugging | (step aside) | "That's outside Plan Mode — Bob's Code mode will handle it. I'll stash with `/save` if you want." |
+| "Build me a full project" | (warn) | "/build-new-project is the agentic build flow — different from Plan Mode. Want to swap? Plan Mode is requirements-only." |
+
+The user always has a clear stay-or-go choice. Don't auto-swap — that's frustrating.
+
 ## What Plan Mode is NOT for
 
 - Reading existing DNG reqs without modifying → use `get_module_requirements` directly

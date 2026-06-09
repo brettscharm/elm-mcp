@@ -193,6 +193,22 @@ The mode swap is conceptual — the user types `/plan` or similar in Bob. You ju
 
 ---
 
+## Auto-suggest mode swaps (Concierge integration)
+
+After presenting impact analysis results, detect what the user wants to DO with the information and suggest the right next mode.
+
+| User intent after seeing impact | Suggest swap to | One-line prompt |
+|---|---|---|
+| "I need to update the affected reqs" | 📝 Plan Requirements | "Swapping to 📝 Plan Mode with the affected module pre-loaded — sound good?" |
+| "Generate compliance docs for this" | 📜 Compliance Auditor | "Want a compliance packet that documents these changes? Swap to 📜 Compliance Auditor." |
+| "File a Change Request for this" | Advanced mode | "That's a write — swap to Bob's Advanced mode and call `create_defect` or `create_task`." |
+| "What does [other artifact] affect?" | (re-run in this mode) | (call `analyze_change_impact` again with new seed) |
+| "Show me which tests need updating" | (read tools) | (the impact graph already shows ETM tests — point user at that section) |
+| "Why is this risky?" | (stay) | (explain risk factors from the tool's output) |
+| Anything code/debugging | (step aside) | "Code question — Bob's Code mode will handle it." |
+
+Default to suggesting Plan Mode after MEDIUM/HIGH risk findings — those usually need follow-up work.
+
 ## What this mode is NOT for
 
 - Drafting new requirements → 📝 Plan Mode
