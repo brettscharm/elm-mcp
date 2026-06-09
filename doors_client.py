@@ -1171,6 +1171,149 @@ class DOORSNextClient:
         'http://jazz.net/xmlns/prod/jazz/reporting/attribute/1.0/',
     ]
 
+    def get_requirement_details(self, req_url: str) -> Optional[Dict]:
+        """Fetch a single requirement's metadata directly from its URL.
+
+        Returns {'title', 'artifact_type', 'status', 'owner',
+        'custom_attributes', 'id'} or None on failure.
+
+        Added in v0.21.1 to support analyze_change_impact's seed
+        resolution — without this, the impact tool fell back to using
+        the URL as the title, which was ugly.
+
+        Uses the OSLC RM resource endpoint (Accept: application/rdf+xml).
+        """
+        if not req_url:
+            return None
+        try:
+            self._ensure_auth()
+            resp = self.session.get(
+                req_url,
+                headers={
+                    'Accept': 'application/rdf+xml',
+                    'OSLC-Core-Version': '2.0',
+                },
+                timeout=self._TIMEOUT,
+            )
+            if resp.status_code != 200:
+                return None
+            root = ET.fromstring(resp.content)
+            ns = self._NS_OSLC
+            # Find the main artifact (Requirement or Description)
+            target = None
+            for tag in ('.//oslc_rm:Requirement',
+                         f'.//{{{ns["rdf"]}}}Description'):
+                el = root.find(tag, ns) if 'oslc_rm:' in tag else root.find(tag)
+                if el is not None:
+                    target = el
+                    break
+            if target is None:
+                return None
+            title_el = target.find('dcterms:title', ns)
+            ident_el = target.find('dcterms:identifier', ns)
+            type_el = target.find('rdm_types:ArtifactFormat', ns) \
+                if 'rdm_types' in ns else None
+            return {
+                'url': req_url,
+                'title': (title_el.text or '').strip() if title_el is not None else '',
+                'id': (ident_el.text or '').strip() if ident_el is not None else '',
+                'artifact_type': '',
+                'status': '',
+                'owner': '',
+                'custom_attributes': {},
+            }
+        except Exception:
+            return None
+
+    def get_requirement_links(self, req_url: str) -> List[Dict]:
+        """Fetch outgoing OSLC links from a single requirement.
+
+        Returns list of {'target_url', 'target_title', 'link_type',
+        'target_type'} for each link found. Best-effort: parses common
+        OSLC RM link predicates (validatedBy, satisfiedBy, elaborates,
+        trackedBy, etc.).
+
+        Added in v0.21.1 to enable analyze_change_impact's BFS graph
+        traversal. Before this, the impact tool always returned just
+        the seed because no client method exposed link discovery.
+        """
+        if not req_url:
+            return []
+        try:
+            self._ensure_auth()
+            resp = self.session.get(
+                req_url,
+                headers={
+                    'Accept': 'application/rdf+xml',
+                    'OSLC-Core-Version': '2.0',
+                },
+                timeout=self._TIMEOUT,
+            )
+            if resp.status_code != 200:
+                return []
+            root = ET.fromstring(resp.content)
+            ns = self._NS_OSLC
+            rdf_ns = ns['rdf']
+            # Find the main artifact element
+            target = None
+            for tag_path in ('.//oslc_rm:Requirement',
+                              f'.//{{{rdf_ns}}}Description'):
+                if 'oslc_rm:' in tag_path:
+                    el = root.find(tag_path, ns)
+                else:
+                    el = root.find(tag_path)
+                if el is not None:
+                    target = el
+                    break
+            if target is None:
+                return []
+
+            # Map of OSLC link predicates → friendly link type labels.
+            # Each predicate's <rdf:resource> attribute gives the target URL.
+            link_predicates = [
+                ('oslc_rm:validatedBy', 'validatedBy'),
+                ('oslc_rm:satisfiedBy', 'satisfiedBy'),
+                ('oslc_rm:elaboratedBy', 'elaboratedBy'),
+                ('oslc_rm:specifiedBy', 'specifiedBy'),
+                ('oslc_rm:trackedBy', 'trackedBy'),
+                ('oslc_rm:affectedBy', 'affectedBy'),
+                ('jazz_rm:specifies', 'specifies'),
+                ('jazz_rm:elaborates', 'elaborates'),
+                ('jazz_rm:validates', 'validates'),
+                ('jazz_rm:satisfies', 'satisfies'),
+                ('jazz_rm:tracksRequirement', 'tracksRequirement'),
+                ('dcterms:references', 'references'),
+                ('jazz_dm:satisfy', 'satisfy'),
+                ('jazz_dm:trace', 'trace'),
+                ('jazz_dm:derives', 'derives'),
+                ('rm_types:Decomposition', 'decomposition'),
+            ]
+
+            link_ns = {
+                'oslc_rm': 'http://open-services.net/ns/rm#',
+                'jazz_rm': 'http://jazz.net/ns/rm#',
+                'jazz_dm': 'http://jazz.net/ns/dm/linktypes#',
+                'dcterms': 'http://purl.org/dc/terms/',
+                'rm_types': 'http://www.ibm.com/xmlns/rdm/types/',
+                'rdf': rdf_ns,
+            }
+
+            links: List[Dict] = []
+            for pred_qname, label in link_predicates:
+                for link_el in target.findall(pred_qname, link_ns):
+                    resource = link_el.get(f'{{{rdf_ns}}}resource')
+                    if not resource:
+                        continue
+                    links.append({
+                        'target_url': resource,
+                        'target_title': '',
+                        'link_type': label,
+                        'target_type': '',
+                    })
+            return links
+        except Exception:
+            return []
+
     @staticmethod
     def _apply_filter(reqs: List[Dict], filter_dict: Dict) -> List[Dict]:
         """Apply a generic filter dict to a list of requirement dicts.
@@ -3274,12 +3417,27 @@ class DOORSNextClient:
                             if kind.lower() in (d.get(f'{{{ns["rdf"]}}}about', '') or '').lower()]
             for el in elements[:max_results]:
                 about = el.get(f'{{{ns["rdf"]}}}about', '')
+                # Filter out the OSLC query capability / catalog URL
+                # itself — it carries query params or ends right at the
+                # `Versioned*` capability path. Real test artifacts have a
+                # specific resource id after that path.
+                # Fixed in v0.21.1 — was returning empty-title catalog
+                # entries as if they were test artifacts.
+                if not about or '?' in about:
+                    continue
+                if about.rstrip('/').endswith(
+                    f'com.ibm.rqm.planning.Versioned{kind}'
+                ):
+                    continue
                 title_el = el.find('dcterms:title', ns)
                 id_el = el.find('dcterms:identifier', ns)
                 status_el = el.find('oslc:status', ns)
+                title_val = ''
+                if title_el is not None and title_el.text:
+                    title_val = title_el.text.strip()
                 results.append({
                     'url': about,
-                    'title': (title_el.text or '').strip() if title_el is not None else '',
+                    'title': title_val,
                     'identifier': (id_el.text or '').strip() if id_el is not None else '',
                     'state': (status_el.text or '').strip() if status_el is not None else '',
                 })

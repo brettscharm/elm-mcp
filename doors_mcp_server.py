@@ -79,7 +79,7 @@ load_dotenv()
 # decide if a newer GitHub release exists; the `connect_to_elm`
 # response also surfaces it so users always know what version they're
 # running.
-__version__ = "0.21.0"
+__version__ = "0.21.1"
 GITHUB_REPO = "brettscharm/elm-mcp"
 
 app = Server("elm-mcp")
@@ -865,19 +865,41 @@ def _get_or_create_client() -> Optional[DOORSNextClient]:
 
 
 def _find_by_identifier(items: List[Dict], identifier: str, key: str = 'title') -> Optional[Dict]:
-    """Find item by 1-based index number or case-insensitive partial name match"""
-    # Try as number first
+    """Find item by 1-based ordinal, exact 'id' field match, or case-
+    insensitive partial name match.
+
+    Resolution order:
+      1. If identifier parses as a small int (<=len(items)), treat as
+         1-based ordinal — preserves the user-friendly "type 2 for the
+         second module" UX.
+      2. Exact match against the item's 'id' field (handles DNG resource
+         IDs like '990953' that get_modules returns). This was missing
+         in v0.21.0 and earlier, causing get_module_requirements and
+         audit_module to reject valid IDs returned by get_modules.
+      3. Case-insensitive substring match against the title (key).
+    """
+    if not identifier:
+        return None
+    ident = str(identifier).strip()
+
+    # 1. Small int → 1-based ordinal (only if in range — large IDs that
+    # technically parse as ints don't accidentally hit a wrong ordinal)
     try:
-        idx = int(identifier) - 1
+        idx = int(ident) - 1
         if 0 <= idx < len(items):
             return items[idx]
     except ValueError:
         pass
 
-    # Partial name match (case-insensitive)
-    lower = identifier.lower()
+    # 2. Exact ID match (new in v0.21.1)
     for item in items:
-        if lower in item.get(key, '').lower():
+        if str(item.get('id', '')) == ident:
+            return item
+
+    # 3. Partial name match (case-insensitive)
+    lower = ident.lower()
+    for item in items:
+        if lower in str(item.get(key, '')).lower():
             return item
 
     return None
@@ -10367,7 +10389,7 @@ async def _dispatch_tool(name: str, arguments: Any) -> list[TextContent]:
                                          text=f"DNG project not found: '{proj_id}'")]
 
                 # Resolve module
-                modules = client.list_modules(project['url'])
+                modules = client.get_modules(project['url'])
                 module = _find_by_identifier(modules, mod_id)
                 if not module:
                     return [TextContent(type="text",
