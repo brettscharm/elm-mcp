@@ -79,7 +79,7 @@ load_dotenv()
 # decide if a newer GitHub release exists; the `connect_to_elm`
 # response also surfaces it so users always know what version they're
 # running.
-__version__ = "0.19.0"
+__version__ = "0.20.0"
 GITHUB_REPO = "brettscharm/elm-mcp"
 
 app = Server("elm-mcp")
@@ -5179,6 +5179,58 @@ async def list_tools() -> list[Tool]:
             }
         ),
         Tool(
+            name="generate_compliance_packet",
+            description=(
+                "Generate an audit-ready compliance documentation packet "
+                "for a DNG project against a specific framework. Loads "
+                "the framework template (NIST 800-53, IEC 62304 today; "
+                "more to come), scans every artifact in scope for control "
+                "references, builds a control-by-control mapping with "
+                "evidence cross-refs and gap analysis, and writes a "
+                "polished self-contained HTML packet to ~/.elm-mcp/reports/. "
+                "Includes executive summary, family coverage table, full "
+                "control matrix, gap analysis with priorities, sign-off "
+                "checklist. Read-only — never mutates ELM state. "
+                "Use when the user mentions an upcoming audit, asks for "
+                "a compliance report, names a framework, or asks 'are we "
+                "ready for the audit?'"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "project_identifier": {
+                        "type": "string",
+                        "description": "DNG project number or name."
+                    },
+                    "framework": {
+                        "type": "string",
+                        "description": (
+                            "Framework short name. Currently available: "
+                            "NIST_800_53, IEC_62304. Call without to see "
+                            "the available list."
+                        )
+                    },
+                    "module_filter": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "Optional list of module names to limit scope "
+                            "(substring match)."
+                        )
+                    },
+                    "safety_class": {
+                        "type": "string",
+                        "description": (
+                            "Safety class for class-aware frameworks "
+                            "(IEC 62304: A | B | C). Filters controls to "
+                            "those that apply to the given class."
+                        )
+                    }
+                },
+                "required": ["project_identifier", "framework"]
+            }
+        ),
+        Tool(
             name="find_traceability_gaps",
             description=(
                 "Scan a DNG project (optionally including linked EWM/ETM) "
@@ -7483,6 +7535,7 @@ async def _dispatch_tool(name: str, arguments: Any) -> list[TextContent]:
                 "Export": ["export_module_to_xlsx"],
                 "Change impact": ["analyze_change_impact"],
                 "Traceability audit": ["find_traceability_gaps"],
+                "Compliance": ["generate_compliance_packet"],
             }
 
             tool_descs = {
@@ -9917,6 +9970,115 @@ async def _dispatch_tool(name: str, arguments: Any) -> list[TextContent]:
                 f"Header row is frozen, auto-filter is on, columns are "
                 f"auto-sized. Ready to share."
                 f"{empty_note}"
+            ))]
+
+        elif name == "generate_compliance_packet":
+            try:
+                from compliance_packet import generate, list_frameworks
+                from compliance_report import (render_compliance_packet,
+                                                  write_report as write_pkt)
+            except Exception as e:
+                return [TextContent(type="text", text=(
+                    f"Failed to load compliance helpers: {e}. "
+                    "Install PyYAML: `pip install pyyaml>=6.0` "
+                    "(it's required for framework templates)."
+                ))]
+            if not client:
+                return [TextContent(type="text", text=(
+                    "Not connected to ELM. Call `connect_to_elm` first."
+                ))]
+
+            proj_id = (arguments.get("project_identifier") or "").strip()
+            framework = (arguments.get("framework") or "").strip()
+            module_filter = arguments.get("module_filter") or None
+            safety_class = (arguments.get("safety_class") or "").strip() or None
+
+            if not framework:
+                # No framework given — list options
+                fws = list_frameworks()
+                if not fws:
+                    return [TextContent(type="text", text=(
+                        "No framework templates found in compliance/ "
+                        "directory. Add a YAML template to enable this tool."
+                    ))]
+                lines = ["# Available compliance frameworks\n"]
+                for f in fws:
+                    lines.append(
+                        f"- **{f['short_name']}** — {f['display_name']}"
+                    )
+                lines.append(
+                    "\nCall again with a `framework` argument set to one "
+                    "of the short names above."
+                )
+                return [TextContent(type="text", text="\n".join(lines))]
+
+            if not proj_id:
+                return [TextContent(type="text",
+                                     text="Error: project_identifier is required.")]
+
+            try:
+                mapping = generate(
+                    client, proj_id, framework,
+                    module_filter=module_filter,
+                    safety_class=safety_class,
+                )
+            except ValueError as e:
+                return [TextContent(type="text", text=str(e))]
+            except Exception as e:
+                return [TextContent(type="text",
+                                     text=f"generate_compliance_packet failed: {e}")]
+
+            try:
+                html_doc = render_compliance_packet(
+                    mapping, version=__version__
+                )
+                path = write_pkt(html_doc,
+                                  project=mapping.project,
+                                  framework=mapping.framework)
+            except Exception as e:
+                return [TextContent(type="text",
+                                     text=f"Failed to write packet: {e}")]
+
+            summary = mapping.summary
+            size_kb = path.stat().st_size / 1024
+            status = summary.get("audit_readiness", "READY")
+            status_emoji = {"READY": "✅",
+                              "READY_WITH_OBSERVATIONS": "🟡",
+                              "NEEDS_WORK": "🔴"}.get(status, "⚪")
+
+            return [TextContent(type="text", text=(
+                f"## Compliance Packet — {mapping.framework}\n\n"
+                f"### {status_emoji} Audit readiness: **{status.replace('_', ' ')}**\n\n"
+                f"**Project:** {mapping.project}\n"
+                f"**Framework:** {mapping.framework} {mapping.revision}\n"
+                f"**Modules in scope:** {len(mapping.scope_modules)} "
+                f"({', '.join(mapping.scope_modules[:5])}"
+                f"{'...' if len(mapping.scope_modules) > 5 else ''})\n"
+                f"{f'**Safety class:** {mapping.safety_class}' if mapping.safety_class else ''}\n\n"
+                f"### Coverage\n"
+                f"- **Controls in scope:** {summary['total_controls']}\n"
+                f"- **Controls with mapped evidence:** "
+                f"{summary['mapped_controls']} "
+                f"({summary['coverage_pct']}%)\n"
+                f"- **Gap controls:** {summary['gap_controls']}\n"
+                f"- **P1 gaps:** {summary['p1_gaps']}\n"
+                f"- **Total evidence links:** {summary['total_evidence_links']}\n"
+                f"- **Artifacts scanned:** {summary['artifact_inventory_size']}\n\n"
+                f"### Polished HTML packet\n\n"
+                f"**File:** `{path}`\n"
+                f"**Size:** {size_kb:.1f} KB · self-contained, "
+                f"air-gap safe · print-friendly\n\n"
+                f"**Open:** `open '{path}'` (macOS) or double-click.\n\n"
+                f"The packet includes: cover, status bar, family coverage "
+                f"table, full control mapping matrix (with evidence "
+                f"cross-refs to DNG artifacts), gap analysis with "
+                f"priorities, and a sign-off checklist for compliance / "
+                f"QA / engineering / security reviewers.\n\n"
+                f"_Note: if coverage is lower than expected, that's "
+                f"usually because artifacts don't tag their compliance "
+                f"refs in a recognizable format. Add references like "
+                f"'NIST 800-53 IA-2' or 'IEC 62304 §5.3.3' to artifact "
+                f"titles or attributes to improve detection._"
             ))]
 
         elif name == "find_traceability_gaps":

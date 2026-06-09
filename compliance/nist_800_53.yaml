@@ -1,0 +1,164 @@
+# NIST 800-53 Rev 5 — selected control families for compliance packet generation
+# Source: NIST SP 800-53 Rev 5, public-domain federal guidance
+# This template is a subset focused on the families most commonly mapped in
+# software development contexts. Extend by adding more controls per family.
+
+framework: "NIST 800-53"
+revision: "Rev 5"
+display_name: "NIST 800-53 Revision 5 — Security and Privacy Controls"
+short_name: "NIST_800_53"
+
+# Detection regex patterns used to recognize compliance refs in DNG artifact
+# titles, attributes, and descriptions
+detection_patterns:
+  - 'NIST\s*800[-\s]?53\s*(?:§|\bsec\.?\s*|\bclause\s*)?([A-Z]{2}-\d+(?:\(\d+\))?)'
+  - 'NIST\s*SP\s*800[-\s]?53\s*([A-Z]{2}-\d+)'
+
+families:
+  - id: "AC"
+    name: "Access Control"
+    controls:
+      - id: "AC-1"
+        title: "Policy and Procedures"
+        priority: "P1"
+        evidence_types: ["policy_doc", "procedure_doc"]
+      - id: "AC-2"
+        title: "Account Management"
+        priority: "P1"
+        evidence_types: ["req", "test_case", "audit_log_spec"]
+      - id: "AC-3"
+        title: "Access Enforcement"
+        priority: "P1"
+        evidence_types: ["req", "test_case", "code_review"]
+      - id: "AC-4"
+        title: "Information Flow Enforcement"
+        priority: "P1"
+        evidence_types: ["architecture_doc", "req", "test_case"]
+      - id: "AC-6"
+        title: "Least Privilege"
+        priority: "P1"
+        evidence_types: ["req", "test_case", "config"]
+      - id: "AC-7"
+        title: "Unsuccessful Logon Attempts"
+        priority: "P2"
+        evidence_types: ["req", "test_case"]
+
+  - id: "IA"
+    name: "Identification and Authentication"
+    controls:
+      - id: "IA-1"
+        title: "Policy and Procedures"
+        priority: "P1"
+        evidence_types: ["policy_doc"]
+      - id: "IA-2"
+        title: "Identification and Authentication (Organizational Users)"
+        priority: "P1"
+        evidence_types: ["req", "test_case", "code_review"]
+      - id: "IA-3"
+        title: "Device Identification and Authentication"
+        priority: "P1"
+        evidence_types: ["req", "test_case"]
+      - id: "IA-5"
+        title: "Authenticator Management"
+        priority: "P1"
+        evidence_types: ["req", "test_case", "policy_doc"]
+      - id: "IA-8"
+        title: "Identification and Authentication (Non-Organizational Users)"
+        priority: "P1"
+        evidence_types: ["req", "test_case"]
+
+  - id: "AU"
+    name: "Audit and Accountability"
+    controls:
+      - id: "AU-1"
+        title: "Policy and Procedures"
+        priority: "P1"
+        evidence_types: ["policy_doc"]
+      - id: "AU-2"
+        title: "Event Logging"
+        priority: "P1"
+        evidence_types: ["req", "test_case", "log_spec"]
+      - id: "AU-3"
+        title: "Content of Audit Records"
+        priority: "P1"
+        evidence_types: ["req", "log_spec"]
+      - id: "AU-9"
+        title: "Protection of Audit Information"
+        priority: "P1"
+        evidence_types: ["req", "test_case", "config"]
+      - id: "AU-11"
+        title: "Audit Record Retention"
+        priority: "P2"
+        evidence_types: ["req", "policy_doc"]
+      - id: "AU-12"
+        title: "Audit Record Generation"
+        priority: "P1"
+        evidence_types: ["req", "test_case"]
+
+  - id: "SC"
+    name: "System and Communications Protection"
+    controls:
+      - id: "SC-1"
+        title: "Policy and Procedures"
+        priority: "P1"
+        evidence_types: ["policy_doc"]
+      - id: "SC-7"
+        title: "Boundary Protection"
+        priority: "P1"
+        evidence_types: ["req", "architecture_doc", "test_case"]
+      - id: "SC-8"
+        title: "Transmission Confidentiality and Integrity"
+        priority: "P1"
+        evidence_types: ["req", "test_case", "config"]
+      - id: "SC-13"
+        title: "Cryptographic Protection"
+        priority: "P1"
+        evidence_types: ["req", "config"]
+      - id: "SC-28"
+        title: "Protection of Information at Rest"
+        priority: "P1"
+        evidence_types: ["req", "test_case", "config"]
+
+  - id: "SI"
+    name: "System and Information Integrity"
+    controls:
+      - id: "SI-1"
+        title: "Policy and Procedures"
+        priority: "P1"
+        evidence_types: ["policy_doc"]
+      - id: "SI-2"
+        title: "Flaw Remediation"
+        priority: "P1"
+        evidence_types: ["procedure_doc", "defect_records"]
+      - id: "SI-4"
+        title: "System Monitoring"
+        priority: "P1"
+        evidence_types: ["req", "monitoring_spec"]
+      - id: "SI-10"
+        title: "Information Input Validation"
+        priority: "P1"
+        evidence_types: ["req", "test_case"]
+      - id: "SI-11"
+        title: "Error Handling"
+        priority: "P2"
+        evidence_types: ["req", "test_case"]
+
+  - id: "CM"
+    name: "Configuration Management"
+    controls:
+      - id: "CM-1"
+        title: "Policy and Procedures"
+        priority: "P1"
+        evidence_types: ["policy_doc"]
+      - id: "CM-2"
+        title: "Baseline Configuration"
+        priority: "P1"
+        evidence_types: ["baseline", "config_doc"]
+      - id: "CM-3"
+        title: "Configuration Change Control"
+        priority: "P1"
+        evidence_types: ["procedure_doc", "change_request"]
+      - id: "CM-6"
+        title: "Configuration Settings"
+        priority: "P1"
+        evidence_types: ["config", "req"]

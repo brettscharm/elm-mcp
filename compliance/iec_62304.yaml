@@ -1,0 +1,179 @@
+# IEC 62304 — Medical device software life cycle processes
+# Source: IEC 62304:2006 + Amendment 1:2015
+# Template covers the activities most commonly mapped to development artifacts.
+# Class A / B / C distinctions determine which controls apply to a project.
+
+framework: "IEC 62304"
+revision: "2006 + A1:2015"
+display_name: "IEC 62304 — Medical device software lifecycle processes"
+short_name: "IEC_62304"
+
+# Detection regex patterns
+detection_patterns:
+  - 'IEC\s*62304\s*(?:Class\s*([A-C])|§\s*(\d+\.\d+(?:\.\d+)?))'
+  - 'IEC\s*62304\s*(?:clause|sec\.?|section)\s*(\d+\.\d+(?:\.\d+)?)'
+  - '62304\s*§\s*(\d+\.\d+(?:\.\d+)?)'
+
+# Class context — when a project specifies its safety class, only matching
+# controls are scored. If no class is specified, default to Class B which
+# covers most software but not life-critical.
+safety_classes:
+  A: "Non-injury or damage to health possible"
+  B: "Non-serious injury possible"
+  C: "Death or serious injury possible"
+
+families:
+  - id: "5"
+    name: "Software Development PROCESS"
+    controls:
+      - id: "5.1"
+        title: "Software development planning"
+        priority: "P1"
+        applies_to: ["A", "B", "C"]
+        evidence_types: ["plan_doc", "process_doc"]
+      - id: "5.1.1"
+        title: "Software development plan"
+        priority: "P1"
+        applies_to: ["A", "B", "C"]
+        evidence_types: ["plan_doc"]
+      - id: "5.1.3"
+        title: "Software development standards, methods and tools planning"
+        priority: "P1"
+        applies_to: ["A", "B", "C"]
+        evidence_types: ["plan_doc"]
+      - id: "5.1.6"
+        title: "Software CONFIGURATION management planning"
+        priority: "P1"
+        applies_to: ["A", "B", "C"]
+        evidence_types: ["plan_doc", "scm_records"]
+
+      - id: "5.2"
+        title: "Software requirements analysis"
+        priority: "P1"
+        applies_to: ["A", "B", "C"]
+        evidence_types: ["req", "review_record"]
+      - id: "5.2.2"
+        title: "Software requirements content"
+        priority: "P1"
+        applies_to: ["A", "B", "C"]
+        evidence_types: ["req"]
+      - id: "5.2.4"
+        title: "RISK CONTROL measures in software requirements"
+        priority: "P1"
+        applies_to: ["B", "C"]
+        evidence_types: ["req", "risk_record"]
+      - id: "5.2.6"
+        title: "Verify software requirements"
+        priority: "P1"
+        applies_to: ["A", "B", "C"]
+        evidence_types: ["review_record", "test_case"]
+
+      - id: "5.3"
+        title: "Software ARCHITECTURAL design"
+        priority: "P1"
+        applies_to: ["B", "C"]
+        evidence_types: ["architecture_doc"]
+      - id: "5.3.1"
+        title: "Transform software requirements into architecture"
+        priority: "P1"
+        applies_to: ["B", "C"]
+        evidence_types: ["architecture_doc"]
+      - id: "5.3.3"
+        title: "Specify functional and performance requirements of SOUP"
+        priority: "P1"
+        applies_to: ["B", "C"]
+        evidence_types: ["soup_spec", "req"]
+      - id: "5.3.5"
+        title: "Identify SEGREGATION necessary for risk control"
+        priority: "P1"
+        applies_to: ["C"]
+        evidence_types: ["architecture_doc", "risk_record"]
+
+      - id: "5.5"
+        title: "Software UNIT implementation and verification"
+        priority: "P1"
+        applies_to: ["B", "C"]
+        evidence_types: ["test_case", "code_review"]
+      - id: "5.5.3"
+        title: "Software UNIT acceptance criteria"
+        priority: "P1"
+        applies_to: ["B", "C"]
+        evidence_types: ["test_case", "code_review"]
+      - id: "5.5.5"
+        title: "Software UNIT verification"
+        priority: "P1"
+        applies_to: ["B", "C"]
+        evidence_types: ["test_case", "test_result"]
+
+      - id: "5.6"
+        title: "Software INTEGRATION and integration testing"
+        priority: "P1"
+        applies_to: ["B", "C"]
+        evidence_types: ["test_case", "test_result"]
+
+      - id: "5.7"
+        title: "SOFTWARE SYSTEM TESTING"
+        priority: "P1"
+        applies_to: ["A", "B", "C"]
+        evidence_types: ["test_plan", "test_case", "test_result"]
+
+  - id: "6"
+    name: "Software MAINTENANCE PROCESS"
+    controls:
+      - id: "6.1"
+        title: "Establish software maintenance plan"
+        priority: "P1"
+        applies_to: ["A", "B", "C"]
+        evidence_types: ["plan_doc"]
+      - id: "6.2"
+        title: "Problem and modification analysis"
+        priority: "P1"
+        applies_to: ["A", "B", "C"]
+        evidence_types: ["defect_records", "change_request"]
+
+  - id: "7"
+    name: "Software RISK MANAGEMENT PROCESS"
+    controls:
+      - id: "7.1"
+        title: "Analysis of software contributing to hazardous situations"
+        priority: "P1"
+        applies_to: ["B", "C"]
+        evidence_types: ["risk_record", "hazard_analysis"]
+      - id: "7.2"
+        title: "RISK CONTROL measures"
+        priority: "P1"
+        applies_to: ["B", "C"]
+        evidence_types: ["risk_record", "req"]
+      - id: "7.3"
+        title: "Verification of RISK CONTROL measures"
+        priority: "P1"
+        applies_to: ["B", "C"]
+        evidence_types: ["test_case", "review_record"]
+
+  - id: "8"
+    name: "Software CONFIGURATION MANAGEMENT PROCESS"
+    controls:
+      - id: "8.1"
+        title: "Configuration identification"
+        priority: "P1"
+        applies_to: ["A", "B", "C"]
+        evidence_types: ["scm_records", "baseline"]
+      - id: "8.2"
+        title: "Change control"
+        priority: "P1"
+        applies_to: ["A", "B", "C"]
+        evidence_types: ["change_request", "scm_records"]
+
+  - id: "9"
+    name: "Software PROBLEM RESOLUTION PROCESS"
+    controls:
+      - id: "9.1"
+        title: "Prepare PROBLEM REPORTS"
+        priority: "P1"
+        applies_to: ["A", "B", "C"]
+        evidence_types: ["defect_records"]
+      - id: "9.5"
+        title: "Verify resolution"
+        priority: "P1"
+        applies_to: ["A", "B", "C"]
+        evidence_types: ["test_case", "test_result", "defect_records"]
