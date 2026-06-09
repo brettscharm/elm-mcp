@@ -79,7 +79,7 @@ load_dotenv()
 # decide if a newer GitHub release exists; the `connect_to_elm`
 # response also surfaces it so users always know what version they're
 # running.
-__version__ = "0.21.1"
+__version__ = "0.22.0"
 GITHUB_REPO = "brettscharm/elm-mcp"
 
 app = Server("elm-mcp")
@@ -5201,6 +5201,65 @@ async def list_tools() -> list[Tool]:
             }
         ),
         Tool(
+            name="get_elm_docs_links",
+            description=(
+                "Return curated, known-good URLs for IBM ELM / DOORS / Bob "
+                "documentation. Use this WHENEVER the user asks for ELM "
+                "docs, upgrade guides, install guides, system requirements, "
+                "release notes / what's new, OSLC reference, AI Hub / "
+                "Requirements Quality Assistant pointers, DXL reference, "
+                "or migration guides. DO NOT generate IBM doc URLs from "
+                "memory — they go stale fast as IBM reorganizes its docs "
+                "site. This tool's URL set is maintained against the real "
+                "live IBM sites; pass `verify_live=true` to HEAD-check "
+                "matches before returning them. Topics: upgrade-planning, "
+                "upgrade-roadmap, upgrade-interactive, system-requirements, "
+                "whatsnew, doors-next-home, ewm-home, etm-home, gcm-home, "
+                "classic-doors-home, dxl, ai-hub, bob-docs-home, "
+                "bob-modes, bob-mcp, support-portal, docs-search, "
+                "passport-advantage, community, elm-mcp. Also accepts "
+                "natural-language topics ('release notes', 'dng', 'rqa', "
+                "etc.) via a synonym table. Read-only."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "topic": {
+                        "type": "string",
+                        "description": (
+                            "Topic slug or natural phrase. Omit for the "
+                            "full curated set. Examples: 'upgrade', "
+                            "'system requirements', 'dng', 'oslc', 'dxl', "
+                            "'rqa', 'whatsnew', 'bob mcp'."
+                        )
+                    },
+                    "version": {
+                        "type": "string",
+                        "description": (
+                            "Filter to a specific ELM version (e.g., '7.1', "
+                            "'9.7'). Entries marked '*' always match. Omit "
+                            "for all versions."
+                        )
+                    },
+                    "product": {
+                        "type": "string",
+                        "description": (
+                            "Filter to a product family. One of: ELM, "
+                            "DOORS Next, EWM, ETM, GCM, Classic, Bob."
+                        )
+                    },
+                    "verify_live": {
+                        "type": "boolean",
+                        "description": (
+                            "If true, HEAD-check each match before returning "
+                            "and flag dead links. Default false (faster)."
+                        )
+                    }
+                },
+                "required": []
+            }
+        ),
+        Tool(
             name="generate_compliance_packet",
             description=(
                 "Generate an audit-ready compliance documentation packet "
@@ -7558,6 +7617,7 @@ async def _dispatch_tool(name: str, arguments: Any) -> list[TextContent]:
                 "Change impact": ["analyze_change_impact"],
                 "Traceability audit": ["find_traceability_gaps"],
                 "Compliance": ["generate_compliance_packet"],
+                "Docs lookup": ["get_elm_docs_links"],
             }
 
             tool_descs = {
@@ -9993,6 +10053,90 @@ async def _dispatch_tool(name: str, arguments: Any) -> list[TextContent]:
                 f"auto-sized. Ready to share."
                 f"{empty_note}"
             ))]
+
+        elif name == "get_elm_docs_links":
+            try:
+                from elm_docs import lookup, all_topics
+            except Exception as e:
+                return [TextContent(type="text",
+                                     text=f"Failed to load elm_docs: {e}")]
+            topic = (arguments.get("topic") or "").strip() or None
+            version = (arguments.get("version") or "").strip() or None
+            product = (arguments.get("product") or "").strip() or None
+            verify_live = bool(arguments.get("verify_live"))
+
+            result = lookup(topic=topic, version=version,
+                              product=product, verify_live=verify_live)
+
+            if not result["matches"]:
+                lines = [
+                    f"# No curated docs found for topic '{topic}'\n",
+                    "Try one of these topic slugs:",
+                    "",
+                ]
+                for t in all_topics()[:30]:
+                    lines.append(f"- `{t}`")
+                lines.append("\n## Fallback search landings\n")
+                for fb in result["fallbacks"]:
+                    lines.append(f"- **[{fb['display']}]({fb['url']})** — {fb['notes']}")
+                return [TextContent(type="text", text="\n".join(lines))]
+
+            lines = [f"# IBM ELM Docs Links\n"]
+            q = result["query"]
+            crit = []
+            if q["topic"]:
+                crit.append(f"topic={q['topic']}")
+            if q["version"]:
+                crit.append(f"version={q['version']}")
+            if q["product"]:
+                crit.append(f"product={q['product']}")
+            if crit:
+                lines.append(f"_Filters: {', '.join(crit)}_\n")
+            lines.append(f"**{result['total']} match(es)**")
+            if verify_live and result["rotted"] > 0:
+                lines.append(f" · ⚠️ **{result['rotted']} dead** — see fallbacks below")
+            lines.append("")
+
+            for m in result["matches"]:
+                tag = f" *(search landing)*" if m.get("is_search") == "true" else ""
+                ver_tag = (f" — v{m['version']}"
+                            if m["version"] != "*" else "")
+                product_tag = f" · _{m['product']}_"
+                live_tag = ""
+                if verify_live:
+                    if m.get("live") is True:
+                        live_tag = " ✅"
+                    elif m.get("live") is False:
+                        live_tag = " ❌ DEAD"
+                lines.append(
+                    f"### [{m['display']}]({m['url']}){tag}{ver_tag}"
+                    f"{product_tag}{live_tag}"
+                )
+                if m.get("notes"):
+                    lines.append(f"_{m['notes']}_")
+                lines.append(f"`{m['url']}`")
+                lines.append("")
+
+            if result["fallbacks"]:
+                lines.append("\n## Search-landing fallbacks\n")
+                lines.append(
+                    "If any deep link above is dead, use these search "
+                    "pages instead — IBM rearranges its docs site "
+                    "frequently:\n"
+                )
+                for fb in result["fallbacks"]:
+                    lines.append(f"- **[{fb['display']}]({fb['url']})** — {fb['notes']}")
+
+            lines.append(
+                "\n---\n"
+                "_Tip: pass `verify_live=true` to HEAD-check links before "
+                "returning. If you find a dead link in this curated set, "
+                "file an issue at "
+                "https://github.com/brettscharm/elm-mcp/issues — the "
+                "URL table updates with each release._"
+            )
+
+            return [TextContent(type="text", text="\n".join(lines))]
 
         elif name == "generate_compliance_packet":
             try:

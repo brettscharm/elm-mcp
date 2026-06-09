@@ -119,6 +119,35 @@ If user says "deep" or "comprehensive," pass `depth=5`. If they say "just direct
 | "What's the team doing?" / "team status" | `get_team_actions` |
 | "Wrap up" / "I'm done for today" | `wrap_up_session` |
 
+### IBM ELM documentation lookups
+
+**Critical rule: NEVER generate IBM doc URLs from your training data.** IBM reorganizes its docs site frequently — URLs you "remember" are usually stale. ALWAYS call `get_elm_docs_links` instead.
+
+| User says | Tool |
+|---|---|
+| "Where are the docs for [X]" | `get_elm_docs_links(topic="X")` |
+| "ELM upgrade guide" / "upgrade path" / "upgrading to 7.1" | `get_elm_docs_links(topic="upgrade")` |
+| "System requirements for ELM 7.1" / "install docs" | `get_elm_docs_links(topic="system-requirements", version="7.1")` |
+| "What's new in 7.1" / "release notes" / "changelog" | `get_elm_docs_links(topic="whatsnew", version="7.1")` |
+| "DOORS Next docs" / "DNG docs" / "RM docs" | `get_elm_docs_links(topic="dng")` |
+| "EWM docs" / "RTC docs" | `get_elm_docs_links(topic="ewm")` |
+| "ETM docs" / "RQM docs" | `get_elm_docs_links(topic="etm")` |
+| "GCM docs" | `get_elm_docs_links(topic="gcm")` |
+| "OSLC reference" / "OSLC spec" | `get_elm_docs_links(topic="oslc")` |
+| "DXL reference" / "Classic DOORS docs" | `get_elm_docs_links(topic="dxl")` |
+| "Requirements Quality Assistant" / "AI Hub" / "RQA" | `get_elm_docs_links(topic="rqa")` |
+| "Bob docs" / "Bob configuration" | `get_elm_docs_links(topic="bob")` |
+| "Download ELM" / "installation media" | `get_elm_docs_links(topic="download")` |
+| "IBM ELM community" / "forums" | `get_elm_docs_links(topic="community")` |
+
+If the user wants verified-live URLs (e.g., before sharing with a customer), pass `verify_live=true`:
+
+```
+get_elm_docs_links(topic="upgrade", verify_live=true)
+```
+
+Dead links in the curated set should be reported as GitHub issues at https://github.com/brettscharm/elm-mcp/issues — the table updates with each release.
+
 ---
 
 ## Level 2 — Suggest + confirm patterns

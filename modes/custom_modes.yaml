@@ -109,6 +109,14 @@ customModes:
       │ tools"                                   │                          │
       ├──────────────────────────────────────────┼──────────────────────────┤
       │ "Health" / "are you connected" / "diag"  │ elm_mcp_health           │
+      ├──────────────────────────────────────────┼──────────────────────────┤
+      │ "ELM docs" / "upgrade guide" / "install  │ get_elm_docs_links       │
+      │ docs" / "where are the docs" / "RQA" /   │                          │
+      │ "AI Hub" / "DXL reference" / "OSLC spec" │                          │
+      │ — ANY request for IBM ELM documentation  │                          │
+      │ URLs. NEVER generate IBM URLs from       │                          │
+      │ memory — they go stale. Always call this │                          │
+      │ tool instead.                            │                          │
       └──────────────────────────────────────────┴──────────────────────────┘
 
       ROUTING TABLE — Level 2 (SUGGEST + ONE-WORD CONFIRM):
