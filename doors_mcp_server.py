@@ -79,7 +79,7 @@ load_dotenv()
 # decide if a newer GitHub release exists; the `connect_to_elm`
 # response also surfaces it so users always know what version they're
 # running.
-__version__ = "0.17.0"
+__version__ = "0.18.0"
 GITHUB_REPO = "brettscharm/elm-mcp"
 
 app = Server("elm-mcp")
@@ -5178,6 +5178,71 @@ async def list_tools() -> list[Tool]:
                 "required": ["audit"]
             }
         ),
+        Tool(
+            name="analyze_change_impact",
+            description=(
+                "Analyze the blast radius of a proposed change. Walks the "
+                "DNG/EWM/ETM trace graph outward from a single artifact "
+                "(req URL, work item URL, or code file path) and surfaces "
+                "everything affected: downstream requirements, test cases, "
+                "open work items, compliance touches, and suggested "
+                "reviewers (artifact owners). Returns a structured summary "
+                "plus a self-contained HTML report written to "
+                "~/.elm-mcp/reports/ with an interactive Cytoscape impact "
+                "graph. Read-only — never mutates ELM state. Use when the "
+                "user asks 'what does this change affect?', 'what's the "
+                "blast radius of X?', 'who needs to review this fix?', or "
+                "'is this safe to merge?'"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "artifact": {
+                        "type": "string",
+                        "description": (
+                            "Starting point — a full DNG/EWM/ETM URL, OR a "
+                            "code file path on disk. Examples: "
+                            "'https://server/rm/resources/BI_xxx' for a "
+                            "DNG req, '/path/to/Auth.java' for code."
+                        )
+                    },
+                    "project_identifier": {
+                        "type": "string",
+                        "description": (
+                            "DNG project number or name. Only required if "
+                            "the artifact is a DNG short ID (e.g. '12345') "
+                            "rather than a full URL."
+                        )
+                    },
+                    "depth": {
+                        "type": "integer",
+                        "description": (
+                            "Trace-graph BFS depth (1-5; default 3). Higher "
+                            "= broader impact but slower."
+                        ),
+                        "default": 3
+                    },
+                    "include_compliance": {
+                        "type": "boolean",
+                        "description": (
+                            "Scan affected artifacts for compliance refs "
+                            "(NIST 800-53, IEC 62304, ISO 26262, DO-178C, "
+                            "HIPAA, GDPR, WCAG, SOC2, PCI-DSS). Default true."
+                        ),
+                        "default": True
+                    },
+                    "include_owners": {
+                        "type": "boolean",
+                        "description": (
+                            "Collect artifact owners as suggested reviewers. "
+                            "Default true."
+                        ),
+                        "default": True
+                    }
+                },
+                "required": ["artifact"]
+            }
+        ),
         # ── EWM: defect creation ───────────────────────────────
         Tool(
             name="create_defect",
@@ -7372,6 +7437,7 @@ async def _dispatch_tool(name: str, arguments: Any) -> list[TextContent]:
                 ],
                 "Visualization": ["generate_chart"],
                 "Export": ["export_module_to_xlsx"],
+                "Change impact": ["analyze_change_impact"],
             }
 
             tool_descs = {
@@ -9806,6 +9872,96 @@ async def _dispatch_tool(name: str, arguments: Any) -> list[TextContent]:
                 f"Header row is frozen, auto-filter is on, columns are "
                 f"auto-sized. Ready to share."
                 f"{empty_note}"
+            ))]
+
+        elif name == "analyze_change_impact":
+            try:
+                from change_impact import analyze
+                from impact_report import render_impact_report, write_report
+            except Exception as e:
+                return [TextContent(type="text", text=(
+                    f"Failed to load change_impact / impact_report: {e}"
+                ))]
+            if not client:
+                return [TextContent(type="text", text=(
+                    "Not connected to ELM. Call `connect_to_elm` first."
+                ))]
+
+            artifact = (arguments.get("artifact") or "").strip()
+            if not artifact:
+                return [TextContent(type="text",
+                                     text="Error: artifact is required.")]
+            project_id = (arguments.get("project_identifier") or "").strip() or None
+            depth = int(arguments.get("depth") or 3)
+            include_compliance = bool(arguments.get("include_compliance", True))
+            include_owners = bool(arguments.get("include_owners", True))
+
+            try:
+                graph = analyze(
+                    client, artifact,
+                    project_identifier=project_id,
+                    depth=depth,
+                    include_compliance=include_compliance,
+                    include_owners=include_owners,
+                )
+            except Exception as e:
+                return [TextContent(type="text",
+                                     text=f"analyze_change_impact failed: {e}")]
+
+            try:
+                html = render_impact_report(
+                    graph,
+                    project=project_id or "",
+                    version=__version__,
+                )
+                path = write_report(html,
+                                      seed_title=graph.seed.title,
+                                      project=project_id or "")
+            except Exception as e:
+                return [TextContent(type="text",
+                                     text=f"Failed to write impact report: {e}")]
+
+            counts = graph.summary_counts()
+            size_kb = path.stat().st_size / 1024
+            risk_emoji = {"HIGH": "🔴", "MEDIUM": "🟡",
+                           "LOW": "🟢", "UNKNOWN": "⚪"}.get(graph.risk, "⚪")
+
+            factors_md = "\n".join(f"  - {f}" for f in graph.risk_factors) or "  - —"
+            reviewers_md = ", ".join(graph.suggested_reviewers) or "_(none surfaced)_"
+
+            compliance_md = ""
+            if graph.compliance_touches:
+                rows = "\n".join(
+                    f"  - **{c['framework']}** {c['ref']}"
+                    for c in graph.compliance_touches
+                )
+                compliance_md = f"\n\n**Compliance touches:**\n{rows}"
+
+            return [TextContent(type="text", text=(
+                f"## Change Impact — {graph.seed.title}\n\n"
+                f"### {risk_emoji} Risk: **{graph.risk}**\n\n"
+                f"**Why:**\n{factors_md}\n\n"
+                f"### Affected artifacts ({counts['total_affected']} total)\n"
+                f"- **DNG requirements:** {counts['dng_reqs']}\n"
+                f"- **EWM work items:** {counts['ewm_work_items']}\n"
+                f"- **ETM test cases:** {counts['etm_tests']}\n"
+                f"- **Code components:** {counts['code_components']}\n"
+                f"- **Compliance refs:** {counts['compliance_controls']}"
+                f"{compliance_md}\n\n"
+                f"### Suggested reviewers\n{reviewers_md}\n\n"
+                f"### Interactive impact graph\n\n"
+                f"**File:** `{path}`\n"
+                f"**Size:** {size_kb:.1f} KB · self-contained, "
+                f"air-gap safe\n\n"
+                f"**Open:** `open '{path}'` (macOS) or double-click.\n\n"
+                f"Every node in the graph is clickable and opens the "
+                f"corresponding DNG / EWM / ETM artifact in a new tab. "
+                f"Drag nodes to rearrange.\n\n"
+                f"_Note: if depth-{depth} traversal yielded fewer hops "
+                f"than expected, OSLC link-fetching for this artifact "
+                f"type may not yet be wired — the framework is in place "
+                f"and graph expansion fills in as link-fetchers are added "
+                f"per domain. Compliance + risk + report still work._"
             ))]
 
         elif name in ("generate_trace_report", "generate_audit_report"):
