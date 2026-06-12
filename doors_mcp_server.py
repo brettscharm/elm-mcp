@@ -79,7 +79,7 @@ load_dotenv()
 # decide if a newer GitHub release exists; the `connect_to_elm`
 # response also surfaces it so users always know what version they're
 # running.
-__version__ = "0.28.0"
+__version__ = "0.29.0"
 GITHUB_REPO = "brettscharm/elm-mcp"
 
 app = Server("elm-mcp")
@@ -5330,6 +5330,79 @@ async def list_tools() -> list[Tool]:
             }
         ),
         Tool(
+            name="create_elm",
+            description=(
+                "Unified natural-language CREATE — preview-first. Use when "
+                "the user wants to CREATE work items (EWM tasks) or test "
+                "cases (ETM) from a description: 'add a task to build the "
+                "login API', 'create test cases for the conversion reqs'. "
+                "You translate the request into structured `items`; the tool "
+                "PREVIEWS exactly what would be created (and lints "
+                "requirement drafts) WITHOUT writing. Nothing is created "
+                "until you call again with confirm=true — this is a "
+                "deliberate safety gate (a create mutates ELM; a query "
+                "doesn't). For DNG REQUIREMENTS, use Plan Mode / "
+                "create_requirements instead — requirements deserve the "
+                "full rigor + module binding, not a quick-create; this tool "
+                "previews+lints DNG drafts but routes the actual write "
+                "there."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "domain": {
+                        "type": "string",
+                        "enum": ["ewm", "etm", "dng"],
+                        "description": (
+                            "What to create: 'ewm' (work items/tasks), "
+                            "'etm' (test cases), 'dng' (requirements — "
+                            "preview only here; write via Plan Mode)."
+                        )
+                    },
+                    "project_identifier": {
+                        "type": "string",
+                        "description": (
+                            "Target project. For ewm use the Change "
+                            "Management project; for etm the Quality "
+                            "Management project."
+                        )
+                    },
+                    "items": {
+                        "description": (
+                            "What to create. Accepts: list of "
+                            "{title, text/description, requirement_url?} "
+                            "dicts, or a list of plain title strings. "
+                            "requirement_url cross-links a task to the DNG "
+                            "req it implements, or a test case to the req "
+                            "it validates."
+                        )
+                    },
+                    "artifact_type": {
+                        "type": "string",
+                        "description": (
+                            "DNG only — the requirement artifact type "
+                            "(e.g. 'System Requirement'). Used in the "
+                            "preview."
+                        )
+                    },
+                    "module_identifier": {
+                        "type": "string",
+                        "description": "DNG only — target module (preview)."
+                    },
+                    "confirm": {
+                        "type": "boolean",
+                        "description": (
+                            "Default false = PREVIEW only (nothing is "
+                            "created). Set true ONLY after showing the user "
+                            "the preview and getting explicit go-ahead — "
+                            "then the ewm/etm items are actually created."
+                        )
+                    }
+                },
+                "required": ["domain", "project_identifier", "items"]
+            }
+        ),
+        Tool(
             name="find_similar_requirements",
             description=(
                 "Semantic search — find requirements that MEAN the same "
@@ -7791,6 +7864,7 @@ async def _dispatch_tool(name: str, arguments: Any) -> list[TextContent]:
                 "Docs lookup": ["get_elm_docs_links"],
                 "Unified query": ["query_elm"],
                 "Semantic search": ["find_similar_requirements"],
+                "Unified create": ["create_elm"],
             }
 
             tool_descs = {
@@ -10419,6 +10493,107 @@ async def _dispatch_tool(name: str, arguments: Any) -> list[TextContent]:
                 f"'NIST 800-53 IA-2' or 'IEC 62304 §5.3.3' to artifact "
                 f"titles or attributes to improve detection._"
             ))]
+
+        elif name == "create_elm":
+            try:
+                import create_engine
+                from req_quality import batch_lint
+            except Exception as e:
+                return [TextContent(type="text",
+                                     text=f"Failed to load create_engine: {e}")]
+            if not client:
+                return [TextContent(type="text", text=(
+                    "Not connected to ELM. Call `connect_to_elm` first."
+                ))]
+            domain = (arguments.get("domain") or "").strip().lower()
+            proj_id = (arguments.get("project_identifier") or "").strip()
+            if domain not in ("dng", "ewm", "etm"):
+                return [TextContent(type="text",
+                                     text="Error: domain must be ewm, etm, or dng.")]
+            if not proj_id:
+                return [TextContent(type="text",
+                                     text="Error: project_identifier is required.")]
+            items = create_engine.normalize_items(arguments.get("items"))
+            if not items:
+                return [TextContent(type="text",
+                                     text="Error: no items to create — provide "
+                                     "a list of {title, text} or titles.")]
+            confirm = bool(arguments.get("confirm"))
+            artifact_type = (arguments.get("artifact_type") or "").strip()
+            module = (arguments.get("module_identifier") or "").strip()
+
+            # ── PREVIEW (default) ───────────────────────────────
+            if not confirm:
+                def _lint(drafts):
+                    try:
+                        return batch_lint(drafts)
+                    except Exception:
+                        return None
+                pv = create_engine.preview(domain, proj_id, items,
+                                            artifact_type=artifact_type,
+                                            module=module, lint_fn=_lint)
+                lines = [
+                    f"# Preview — would create {pv['count']} {pv['target']}",
+                    f"_in project: {proj_id}_\n",
+                    "**Nothing has been created yet.** Review below, then "
+                    "say *create them* / *confirm* to write.\n",
+                ]
+                for i, it in enumerate(pv["items"], 1):
+                    lines.append(f"{i}. **{it['title']}**")
+                    if it.get("text"):
+                        lines.append(f"   {it['text'][:120]}")
+                    if it.get("requirement_url"):
+                        lines.append(f"   ↳ links to: {it['requirement_url']}")
+                # Lint summary for DNG drafts (batch_lint returns a list
+                # of per-item dicts with a 'score')
+                if pv.get("lint") and isinstance(pv["lint"], list):
+                    scores = [r.get("score") for r in pv["lint"]
+                              if isinstance(r.get("score"), (int, float))]
+                    if scores:
+                        avg = round(sum(scores) / len(scores))
+                        weak = sum(1 for s in scores if s < 75)
+                        lines.append(f"\n**Quality lint:** avg {avg}/100"
+                                      + (f" · {weak} below 75 — tighten before "
+                                         "creating" if weak else " · all solid"))
+                if domain == "dng":
+                    lines.append(
+                        "\n_For DNG requirements, create via 📝 Plan Mode or "
+                        "`create_requirements` — they handle module binding "
+                        "+ the full quality gates. This preview is the "
+                        "quick check._")
+                else:
+                    lines.append(
+                        f"\n_To create these, call create_elm again with "
+                        f"the same args plus `confirm=true`._")
+                return [TextContent(type="text", text="\n".join(lines))]
+
+            # ── CONFIRM (write) ─────────────────────────────────
+            if domain == "dng":
+                return [TextContent(type="text", text=(
+                    "DNG requirement creation routes through the disciplined "
+                    "flow — use 📝 Plan Mode or the `create_requirements` "
+                    "tool (module binding + quality gates). create_elm "
+                    "confirm only writes EWM tasks and ETM test cases."
+                ))]
+            if domain == "ewm":
+                result = create_engine.commit_ewm(client, proj_id, items)
+            else:
+                result = create_engine.commit_etm(client, proj_id, items)
+
+            created = result["created"]
+            errors = result["errors"]
+            lines = [f"# Created {len(created)} "
+                     f"{'work item(s)' if domain=='ewm' else 'test case(s)'}\n"]
+            for c in created:
+                idp = f" (ID {c['id']})" if c.get("id") else ""
+                lines.append(f"- ✓ **{c['title']}**{idp}")
+                if c.get("url"):
+                    lines.append(f"  {c['url']}")
+            if errors:
+                lines.append(f"\n**{len(errors)} failed:**")
+                for e in errors:
+                    lines.append(f"- ❌ {e}")
+            return [TextContent(type="text", text="\n".join(lines))]
 
         elif name == "find_similar_requirements":
             try:

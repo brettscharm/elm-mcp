@@ -97,6 +97,12 @@ customModes:
       ├──────────────────────────────────────────┼──────────────────────────┤
       │ "Build from this [PDF/epic/module]"      │ /build-from-existing     │
       ├──────────────────────────────────────────┼──────────────────────────┤
+      │ "Create / add a <task|test case>" —       │ create_elm               │
+      │ 'add a task to build the login API',      │ (preview-FIRST: shows    │
+      │ 'create test cases for these reqs'.       │  what would be created   │
+      │ Work items (ewm) + test cases (etm).      │  with NO write; confirm  │
+      │ For DNG REQUIREMENTS use 📝 Plan Mode.     │  =true to actually write)│
+      ├──────────────────────────────────────────┼──────────────────────────┤
       │ "Find / show / list <reqs|work items|     │ query_elm                │
       │ tests> matching <any description>" —      │ (unified NL query        │
       │ 'approved reqs without tests', 'open       │  across DNG/EWM/ETM —    │
