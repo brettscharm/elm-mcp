@@ -37,8 +37,11 @@ curl -fsSL https://raw.githubusercontent.com/brettscharm/elm-mcp/main/install.sh
 That command:
 - Downloads ELM MCP to `~/.elm-mcp`
 - Asks you for your ELM URL, username, password (typed at the prompt — never sent anywhere except your own machine)
-- Writes Bob's MCP config automatically (`~/.bob/mcp_settings.json`)
+- Writes Bob's MCP config automatically (`~/.bob/settings/mcp_settings.json`)
+- **Installs the 5 custom modes** (🧭 Concierge, 📝 Plan, 📤 Push, 🎯 Impact Analyst, 📜 Compliance Auditor) — merged into Bob's modes, your other modes preserved
 - Verifies the whole thing works end-to-end
+
+> Don't want the modes? `python3 ~/.elm-mcp/setup.py --no-modes`. Re-install just the modes after editing them? `python3 ~/.elm-mcp/setup.py --modes-only`.
 
 ### Step 2 — fully quit + reopen Bob
 

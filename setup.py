@@ -819,6 +819,147 @@ def print_config() -> int:
     return 0
 
 
+# ── mode auto-install ────────────────────────────────────────
+
+# elm-mcp custom-mode slugs. The mode installer OWNS these slugs — on
+# install it removes any existing copies and re-adds the current version,
+# leaving every OTHER mode in the user's Bob config untouched.
+_ELM_MODE_SLUGS = (
+    "concierge",
+    "requirements-planner",
+    "requirements-pusher",
+    "impact-analyst",
+    "compliance-auditor",
+)
+
+
+def _yaml_block_str_representer(dumper, data):
+    """Force PyYAML to use literal block style (|) for any multi-line
+    string so the big roleDefinition / customInstructions markdown blocks
+    stay readable in Bob's custom_modes.yaml (matches Bob's own format)."""
+    if "\n" in data:
+        return dumper.represent_scalar("tag:yaml.org,2002:str", data,
+                                        style="|")
+    return dumper.represent_scalar("tag:yaml.org,2002:str", data)
+
+
+def install_modes(home: Path) -> bool:
+    """Install elm-mcp's 5 custom Bob modes automatically.
+
+    Collapses the old manual dance (paste YAML into Bob's settings + copy
+    five rules dirs) into one step:
+
+      1. Merge `modes/custom_modes.yaml` into Bob's global custom modes at
+         ~/.bob/settings/custom_modes.yaml — replacing our slugs, keeping
+         every other mode the user has.
+      2. Copy each `modes/rules/rules-{slug}/` into ~/.bob/rules-{slug}/.
+
+    Skips gracefully (returns False, no error) if Bob isn't detected or
+    the modes/ dir is missing. Bob-specific — Claude Code / Cursor don't
+    use this mode system.
+    """
+    if not host_present_bob(home):
+        info("Bob not detected — skipping custom-mode install. "
+             "(Modes are a Bob feature; other hosts don't use them.)")
+        return False
+
+    modes_dir = HERE / "modes"
+    src_yaml = modes_dir / "custom_modes.yaml"
+    if not src_yaml.exists():
+        warn(f"modes/custom_modes.yaml not found — skipping mode install.")
+        return False
+
+    try:
+        import yaml
+    except ImportError:
+        warn("PyYAML not importable — skipping mode install. "
+             "Run `pip install pyyaml` then re-run setup.")
+        return False
+
+    yaml.add_representer(str, _yaml_block_str_representer)
+
+    # ── Load our modes ──────────────────────────────────────────
+    try:
+        our_doc = yaml.safe_load(src_yaml.read_text(encoding="utf-8"))
+        our_modes = our_doc.get("customModes", []) if our_doc else []
+    except Exception as e:
+        warn(f"Couldn't parse our custom_modes.yaml: {e}")
+        return False
+    if not our_modes:
+        warn("No modes found in modes/custom_modes.yaml.")
+        return False
+
+    # ── Locate Bob's global custom-modes file ───────────────────
+    # Newer Bob: ~/.bob/settings/custom_modes.yaml. Older: ~/.bob/custom_modes.yaml.
+    settings_dir = home / ".bob" / "settings"
+    candidates = [
+        settings_dir / "custom_modes.yaml",
+        home / ".bob" / "custom_modes.yaml",
+    ]
+    target = next((c for c in candidates if c.exists()), None)
+    if target is None:
+        settings_dir.mkdir(parents=True, exist_ok=True)
+        target = settings_dir / "custom_modes.yaml"
+        existing_modes = []
+    else:
+        try:
+            existing_doc = yaml.safe_load(target.read_text(encoding="utf-8"))
+            existing_modes = (existing_doc.get("customModes", [])
+                              if existing_doc else [])
+        except Exception as e:
+            warn(f"Couldn't parse existing {target.name}: {e} — "
+                 "backing it up and starting fresh.")
+            existing_modes = []
+
+    # ── Merge: drop our slugs from existing, then append ours ───
+    kept = [m for m in existing_modes
+            if m.get("slug") not in _ELM_MODE_SLUGS]
+    merged = kept + our_modes
+
+    # Back up before writing (user may have hand-edited modes)
+    if target.exists():
+        try:
+            shutil.copy2(target, target.with_suffix(".yaml.bak"))
+        except Exception:
+            pass
+
+    try:
+        out = yaml.dump({"customModes": merged},
+                        default_flow_style=False,
+                        sort_keys=False,
+                        allow_unicode=True,
+                        width=10_000)
+        target.write_text(out, encoding="utf-8")
+    except Exception as e:
+        fail(f"Couldn't write merged modes to {target}: {e}")
+        return False
+
+    ok(f"Installed {len(our_modes)} elm-mcp modes into {target}")
+    if kept:
+        info(f"Preserved {len(kept)} of your other custom mode(s).")
+
+    # ── Copy the rules playbooks ────────────────────────────────
+    rules_src = modes_dir / "rules"
+    installed_rules = 0
+    for slug in _ELM_MODE_SLUGS:
+        src = rules_src / f"rules-{slug}"
+        if not src.exists():
+            continue
+        dst = home / ".bob" / f"rules-{slug}"
+        try:
+            dst.mkdir(parents=True, exist_ok=True)
+            for f in src.iterdir():
+                if f.is_file():
+                    shutil.copy2(f, dst / f.name)
+            installed_rules += 1
+        except Exception as e:
+            warn(f"Couldn't copy rules for {slug}: {e}")
+    if installed_rules:
+        ok(f"Installed {installed_rules} mode playbook(s) into ~/.bob/rules-*/")
+
+    return True
+
+
 # ── main ─────────────────────────────────────────────────────
 
 def main() -> int:
@@ -843,7 +984,31 @@ def main() -> int:
              "(get_jira_issue, add_jira_comment, etc.) which talks to "
              "Jira's REST API directly. No Atlassian MCP / Node / OAuth.",
     )
+    parser.add_argument(
+        "--no-modes", action="store_true",
+        help="Skip auto-installing the 5 elm-mcp custom Bob modes "
+             "(Concierge, Plan, Push, Impact Analyst, Compliance Auditor). "
+             "By default setup merges them into Bob's custom_modes.yaml and "
+             "copies their playbooks. Use this if you manage modes by hand.",
+    )
+    parser.add_argument(
+        "--modes-only", action="store_true",
+        help="ONLY (re)install the custom Bob modes — skip deps, host "
+             "config, credentials, and smoke test. Handy after editing the "
+             "mode files, or to repair a broken mode install.",
+    )
     args = parser.parse_args()
+
+    if args.modes_only:
+        print(f"{BOLD}DOORS Next AI Agent — modes-only install{RESET}")
+        installed = install_modes(Path.home())
+        if installed:
+            print(f"\n{GREEN}{BOLD}Modes installed.{RESET} "
+                  f"Fully quit and reopen Bob to load them.\n")
+            return 0
+        print(f"\n{YELLOW}No modes installed{RESET} "
+              f"(Bob not detected, or modes/ missing).\n")
+        return 1
 
     if args.diagnose:
         return diagnose()
@@ -860,7 +1025,8 @@ def main() -> int:
         info("If unsure, re-run with the OS-default python: /usr/bin/python3 setup.py")
 
     py_exe = sys.executable
-    total = 5
+    install_bob_modes = (not args.no_modes) and host_present_bob(Path.home())
+    total = 6 if install_bob_modes else 5
 
     step(1, total, "Install Python dependencies")
     if not install_dependencies(py_exe):
@@ -889,6 +1055,11 @@ def main() -> int:
         fail("Server smoke test failed. The MCP server will not work in your IDE.")
         return 1
 
+    if install_bob_modes:
+        step(6, total, "Install Bob custom modes (Concierge, Plan, Push, "
+                        "Impact Analyst, Compliance Auditor)")
+        install_modes(Path.home())
+
     # Credential check is informational only — don't fail setup if creds
     # aren't entered yet, the server still loads its tools without them.
     print()
@@ -915,6 +1086,14 @@ def main() -> int:
     print(f"  {BOLD}2. In Bob's chat, say:{RESET}")
     print(f"     {GREEN}'Connect to ELM and list my projects'{RESET}")
     print()
+    if install_bob_modes:
+        print(f"  {DIM}The 5 elm-mcp modes (🧭 Concierge, 📝 Plan, 📤 Push, "
+              f"🎯 Impact Analyst,{RESET}")
+        print(f"  {DIM}📜 Compliance Auditor) were installed automatically. "
+              f"After restart,{RESET}")
+        print(f"  {DIM}pick them from Bob's mode menu or just type /plan / "
+              f"/concierge.{RESET}")
+        print()
     print(f"  {BOLD}3. If Bob doesn't see ELM MCP after restart{RESET} — some Bob versions")
     print(f"     {BOLD}don't auto-pick-up new entries in `~/.bob/mcp_settings.json`. Add it manually:{RESET}\n")
     print(f"     a) Open Bob → Settings → MCP Servers (or equivalent menu)")

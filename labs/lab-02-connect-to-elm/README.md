@@ -141,6 +141,6 @@ The full-text search is fast and surfaces results across every module.
 
 ## What's next
 
-→ [Lab 3: Install the modes](../lab-03-install-modes/)
+→ [Lab 3: Verify the modes](../lab-03-install-modes/)
 
-Now that the raw MCP works, we'll add the **5 custom Bob modes** (Concierge, Plan, Push, Impact Analyst, Compliance Auditor). These are the discoverability + UX layer over the MCP tools.
+The installer already loaded the **5 custom Bob modes** (Concierge, Plan, Push, Impact Analyst, Compliance Auditor) — Lab 3 confirms they're working and explains what each one does.

@@ -2,7 +2,7 @@
 
 A hands-on tutorial sequence that takes you from zero to comfortable using elm-mcp with IBM Bob and your real ELM environment.
 
-**Total time for v0.23.0 (Labs 0-6):** ~80 minutes
+**Total time for Labs 0-6:** ~70 minutes (install is now a single command)
 **Total time for the full series:** ~5.5 hours
 
 ---
@@ -12,9 +12,9 @@ A hands-on tutorial sequence that takes you from zero to comfortable using elm-m
 | # | Lab | Time | What you walk away with |
 |---|---|---|---|
 | 0 | [Prerequisites](lab-00-prerequisites/) | 5 min | Bob installed, IDE ready, ELM creds in hand |
-| 1 | [Install elm-mcp](lab-01-install-mcp/) | 10 min | MCP server registered with Bob; health check passes |
+| 1 | [Install elm-mcp](lab-01-install-mcp/) | 5 min | One command → server registered, modes installed, health check passes |
 | 2 | [Connect to ELM](lab-02-connect-to-elm/) | 10 min | Logged in, your DNG / EWM / ETM projects listed |
-| 3 | [Install the modes](lab-03-install-modes/) | 10 min | 5 custom modes loaded (Concierge, Plan, Push, Impact Analyst, Compliance Auditor) |
+| 3 | [Verify the modes](lab-03-install-modes/) | 5 min | Confirm the 5 auto-installed modes loaded; understand what each does |
 | 4 | [Natural-language routing](lab-04-concierge-routing/) | 15 min | Type plain English, Bob routes to the right tool/mode |
 | 5 | [Read requirements (DNG)](lab-05-read-requirements/) | 15 min | Browse modules, get + filter + search requirements |
 | 6 | [Plan + Push requirements](lab-06-plan-push/) | 30 min | Full Plan Mode session → batch push to DNG → automatic audit |

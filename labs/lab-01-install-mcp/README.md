@@ -1,72 +1,43 @@
 # Lab 1: Install elm-mcp
 
-**Time:** 10 minutes
+**Time:** 5 minutes
 **Prerequisites:** [Lab 0](../lab-00-prerequisites/) complete
-**Learning objective:** Get the elm-mcp server installed and registered with Bob.
+**Learning objective:** Get elm-mcp installed, configured, and its modes loaded — in one command.
 
 ---
 
-## What you're installing
+## The one-command install
 
-`elm-mcp` is a Python-based MCP server. The install script:
+Open Terminal. Paste this. Hit Enter.
 
-1. Clones the repo to `~/.elm-mcp/` (or updates an existing clone)
-2. Installs Python dependencies
-3. Writes a config entry to Bob's settings telling it where to find the server
-4. Verifies the server starts and Bob can talk to it
+```bash
+curl -fsSL https://raw.githubusercontent.com/brettscharm/elm-mcp/main/install.sh | bash
+```
 
-Total disk usage: ~30 MB.
+That single command does **everything**:
+
+1. Downloads elm-mcp to `~/.elm-mcp`
+2. Installs all Python dependencies
+3. Prompts you for your ELM URL, username, and password (typed at the prompt — saved locally only, never sent anywhere except your own ELM server)
+4. Writes Bob's MCP config automatically (`~/.bob/settings/mcp_settings.json`)
+5. **Auto-installs the 5 custom modes** (Concierge, Plan, Push, Impact Analyst, Compliance Auditor) — merging them into Bob's modes config and copying their playbooks
+6. Runs an end-to-end smoke test to confirm it all works
+
+When it finishes, you'll see a green "Setup complete" with next steps.
+
+> **Modes are installed automatically.** In older versions of these labs, Lab 3 walked you through manually pasting YAML and copying playbook folders. As of v0.23.1, the installer does it for you. Lab 3 is now just a verify-and-understand step.
 
 ---
 
-## Steps
+## Then: fully quit and reopen Bob
 
-### 1. Clone the repo
+**Cmd + Q in Bob, then reopen.** Bob only loads MCP servers and custom modes at startup — you have to actually quit, not just close the window.
 
-Pick a working directory and clone:
+(VS Code / Cursor users: reload the window instead — Cmd-Shift-P → "Developer: Reload Window".)
 
-```bash
-cd ~
-git clone https://github.com/brettscharm/elm-mcp.git
-cd elm-mcp
-```
+---
 
-### 2. Run the setup script
-
-```bash
-python3 setup.py
-```
-
-What you'll see:
-
-- The script asks for your ELM URL, username, and password (saves them to `~/.elm-mcp/.env`)
-- It installs Python dependencies via `pip`
-- It writes Bob's MCP config (location varies by host — `~/.claude.json` for Claude Code, `~/.cursor/mcp.json` for Cursor, etc.)
-- It verifies the server starts end-to-end
-
-Setup is interactive — answer the prompts. Most defaults are correct.
-
-### 3. Restart your MCP host
-
-For Bob (and most other hosts), you need to restart the app to pick up the new MCP server:
-
-- **IBM Bob** — quit and re-open
-- **Cursor / VS Code** — reload the window (Cmd-Shift-P → "Developer: Reload Window")
-- **Claude Code** — start a new session
-
-### 4. Verify the server is registered
-
-In Bob, type:
-
-```
-What MCP servers are connected?
-```
-
-OR check Bob's MCP / settings panel.
-
-You should see `elm-mcp` (or whatever you named it during setup) listed.
-
-### 5. Run the health check
+## Verify
 
 In Bob, type:
 
@@ -74,11 +45,11 @@ In Bob, type:
 Run elm_mcp_health
 ```
 
-Bob calls the `elm_mcp_health` tool. Expected output:
+Expected output:
 
 ```
 # ELM MCP — Health Check
-Version: v0.22.1 (or later)
+Version: v0.23.1 (or later)
 Install dir: /Users/<you>/.elm-mcp
 Git status: git-managed (auto-update available)
 
@@ -86,23 +57,17 @@ Git status: git-managed (auto-update available)
 - State: connected
 - ELM URL: https://...
 - User: ...
-
-## Updates
-- Auto-update enabled: True
-- Last check: ...
 ```
 
----
+Then check the modes loaded — look at Bob's mode picker (top of the chat panel). You should see:
 
-## Verify
+- 🧭 ELM Concierge
+- 📝 Plan Requirements
+- 📤 Push Requirements
+- 🎯 Impact Analyst
+- 📜 Compliance Auditor
 
-You should see all three of these:
-
-- ✅ `python3 ~/.elm-mcp/setup.py --diagnose` exits without errors
-- ✅ `elm_mcp_health` tool returns a "connected" state
-- ✅ Bob sees `elm-mcp` listed in its connected MCP servers panel
-
-If any of these fail, see Common Pitfalls below.
+If you see the health check pass AND the modes in the picker, **you're done with install.** That's it.
 
 ---
 
@@ -110,30 +75,46 @@ If any of these fail, see Common Pitfalls below.
 
 ### "Bob doesn't see the server after restart"
 
-The MCP config got written to the wrong file. Run setup with `--host` to target your specific host:
+Some Bob deployments don't auto-load new MCP config entries. The installer prints a JSON block at the end with your exact paths filled in. Open Bob → Settings → MCP Servers → Add Server and use:
+
+- **Name:** `elm-mcp`
+- **Command:** (the Python path the installer printed)
+- **Args:** (the server path the installer printed)
+
+Then restart Bob again.
+
+### "The curl command asks for my password but nothing happens when I type"
+
+The installer re-attaches your terminal for the credential prompt. If you piped through something that consumed stdin, run the two-step version instead:
 
 ```bash
-python3 setup.py --host bob       # or claude / cursor / vscode
+git clone https://github.com/brettscharm/elm-mcp.git ~/.elm-mcp
+cd ~/.elm-mcp
+python3 setup.py
 ```
 
-### "Setup script complains about missing pip packages"
+Same result — `setup.py` is what `install.sh` calls anyway.
 
-You might be in a Python virtualenv that doesn't have permissions. Either:
+### "Modes didn't show up in the picker"
 
-- Run `python3 -m pip install --user -r requirements.txt` first
-- Or deactivate the virtualenv and use system Python: `deactivate && python3 setup.py`
+Two checks:
+
+1. Did you fully quit Bob (Cmd+Q) and reopen? Modes load at startup only.
+2. Re-run just the mode install:
+   ```bash
+   python3 ~/.elm-mcp/setup.py --modes-only
+   ```
+   This re-installs the 5 modes without redoing the whole setup.
 
 ### "ELM connection failed: authentication error"
 
-Three likely causes:
-
-- Wrong username or password — re-run setup and re-enter
-- Your account requires an app password (MFA-enabled) — generate one in your ELM profile
-- Your ELM server requires Form auth, not Basic — setup tries both, but corporate SAML deployments sometimes need extra config. Check with your ELM admin.
+- Wrong username/password — re-run `python3 ~/.elm-mcp/setup.py` and re-enter
+- Your account requires an app password (MFA enabled) — generate one in your ELM profile
+- Corporate SAML deployments sometimes need extra config — check with your ELM admin
 
 ### "Server version too old"
 
-If `elm_mcp_health` shows v0.21 or older, tell Bob:
+Tell Bob:
 
 ```
 Update elm-mcp
@@ -143,12 +124,43 @@ The `update_elm_mcp` tool pulls the latest release in one shot.
 
 ---
 
+## Diagnosing problems
+
+If anything's off, run:
+
+```bash
+python3 ~/.elm-mcp/setup.py --diagnose
+```
+
+It re-runs the dependency check, MCP handshake test, and credential check, and tells you in plain English what's wrong.
+
+---
+
+## Updating later
+
+Any of these update you to the latest:
+
+```bash
+# Re-run the installer (idempotent — updates in place)
+curl -fsSL https://raw.githubusercontent.com/brettscharm/elm-mcp/main/install.sh | bash
+
+# OR from the install dir
+cd ~/.elm-mcp && git pull && python3 setup.py
+
+# OR just ask Bob
+# "update yourself"
+```
+
+---
+
 ## Try it yourself
 
-Run `list_capabilities` in Bob. You'll see all 79 tools grouped by domain — this is the full inventory of what elm-mcp can do. We'll work through the most useful ones in the rest of this series.
+Run `list_capabilities` in Bob. You'll see all 79 tools grouped by domain — the full inventory. We'll work through the most useful ones in the rest of the series.
 
 ---
 
 ## What's next
 
 → [Lab 2: Connect to ELM](../lab-02-connect-to-elm/)
+
+The installer already entered your credentials, so Lab 2 is mostly about confirming you can see your real ELM data through Bob.
