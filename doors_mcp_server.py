@@ -79,7 +79,7 @@ load_dotenv()
 # decide if a newer GitHub release exists; the `connect_to_elm`
 # response also surfaces it so users always know what version they're
 # running.
-__version__ = "0.24.0"
+__version__ = "0.24.1"
 GITHUB_REPO = "brettscharm/elm-mcp"
 
 app = Server("elm-mcp")
@@ -10677,7 +10677,7 @@ async def _dispatch_tool(name: str, arguments: Any) -> list[TextContent]:
                 + "\n".join(run_lines) + "\n\n"
                 f"## Environment\n"
                 f"- **Python:** {sys.version.split()[0]} at `{sys.executable}`\n"
-                f"- **Tool count registered:** 51 (run `list_capabilities` for the full inventory)\n\n"
+                f"- **Tool count registered:** {len(await list_tools())} (run `list_capabilities` for the full inventory)\n\n"
                 f"_If something looks wrong above and you can't fix it from "
                 f"chat: run `python3 setup.py --diagnose` from a terminal — "
                 f"it does the same checks plus a full MCP-handshake test._"

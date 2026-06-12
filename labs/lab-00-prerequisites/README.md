@@ -29,7 +29,7 @@ elm-mcp runs on **macOS, Linux, and Windows**. The install commands differ sligh
 
 Everything after install (Bob, the modes, the tools) is identical across platforms.
 
-### Python 3.10 or later
+### Python 3.9 or later
 
 macOS / Linux:
 ```bash
@@ -41,7 +41,7 @@ Windows (PowerShell):
 py --version
 ```
 
-You should see `Python 3.10.x` or newer. If not, install Python from [python.org](https://www.python.org/downloads/) — **on Windows, check "Add Python to PATH"** in the installer.
+You should see `Python 3.9.x` or newer (the installer requires 3.9+; 3.11+ is recommended). If not, install Python from [python.org](https://www.python.org/downloads/) — **on Windows, check "Add Python to PATH"** in the installer.
 
 ### Git
 
