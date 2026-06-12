@@ -12,7 +12,7 @@
 
 ## Set up Bob in 3 steps (30 seconds)
 
-You need: a Mac/Linux machine, Python 3.9+, and an ELM account.
+You need: macOS, Linux, **or Windows**; Python 3.9+; and an ELM account.
 
 > ### 🛑 Prerequisite: DNG configuration management (CM) must be enabled on your projects
 >
@@ -28,24 +28,35 @@ You need: a Mac/Linux machine, Python 3.9+, and an ELM account.
 
 ### Step 1 — install
 
-Open Terminal. Paste this. Hit Enter.
+**macOS / Linux** — open Terminal, paste this, hit Enter:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/brettscharm/elm-mcp/main/install.sh | bash
 ```
 
-That command:
-- Downloads ELM MCP to `~/.elm-mcp`
+**Windows** — open PowerShell, paste this, hit Enter:
+
+```powershell
+irm https://raw.githubusercontent.com/brettscharm/elm-mcp/main/install.ps1 | iex
+```
+
+Either command:
+- Downloads ELM MCP to `~/.elm-mcp` (`%USERPROFILE%\.elm-mcp` on Windows)
 - Asks you for your ELM URL, username, password (typed at the prompt — never sent anywhere except your own machine)
 - Writes Bob's MCP config automatically (`~/.bob/settings/mcp_settings.json`)
 - **Installs the 5 custom modes** (🧭 Concierge, 📝 Plan, 📤 Push, 🎯 Impact Analyst, 📜 Compliance Auditor) — merged into Bob's modes, your other modes preserved
 - Verifies the whole thing works end-to-end
 
-> Don't want the modes? `python3 ~/.elm-mcp/setup.py --no-modes`. Re-install just the modes after editing them? `python3 ~/.elm-mcp/setup.py --modes-only`.
+> **No internet one-liner / corporate-locked machine?** Works on every OS:
+> `git clone https://github.com/brettscharm/elm-mcp.git ~/.elm-mcp`, then
+> `cd ~/.elm-mcp` and `python3 setup.py` (use `py setup.py` on Windows).
+> `setup.py` is the cross-platform workhorse — the one-liners above just wrap it.
+
+> Don't want the modes? add `--no-modes`. Re-install just the modes after editing them? `setup.py --modes-only`.
 
 ### Step 2 — fully quit + reopen Bob
 
-**Cmd + Q in Bob, then reopen.** Bob only loads MCP servers at startup; you have to actually quit, not just close the window.
+Bob only loads MCP servers at startup; you have to actually quit, not just close the window. **macOS:** Cmd + Q. **Windows:** right-click the tray/taskbar icon → Quit (or Alt+F4). Then reopen.
 
 ### Step 3 — say hi
 

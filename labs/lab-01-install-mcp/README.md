@@ -8,10 +8,16 @@
 
 ## The one-command install
 
-Open Terminal. Paste this. Hit Enter.
+**macOS / Linux** — open Terminal, paste this, hit Enter:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/brettscharm/elm-mcp/main/install.sh | bash
+```
+
+**Windows** — open PowerShell, paste this, hit Enter:
+
+```powershell
+irm https://raw.githubusercontent.com/brettscharm/elm-mcp/main/install.ps1 | iex
 ```
 
 That single command does **everything**:
@@ -31,9 +37,11 @@ When it finishes, you'll see a green "Setup complete" with next steps.
 
 ## Then: fully quit and reopen Bob
 
-**Cmd + Q in Bob, then reopen.** Bob only loads MCP servers and custom modes at startup — you have to actually quit, not just close the window.
+Bob only loads MCP servers and custom modes at startup — you have to actually quit, not just close the window.
 
-(VS Code / Cursor users: reload the window instead — Cmd-Shift-P → "Developer: Reload Window".)
+- **macOS:** Cmd + Q, then reopen
+- **Windows:** right-click the Bob tray/taskbar icon → Quit (or Alt+F4), then reopen
+- **VS Code / Cursor (any OS):** reload the window — `Ctrl/Cmd-Shift-P` → "Developer: Reload Window"
 
 ---
 
@@ -83,26 +91,35 @@ Some Bob deployments don't auto-load new MCP config entries. The installer print
 
 Then restart Bob again.
 
-### "The curl command asks for my password but nothing happens when I type"
+### "The one-liner doesn't prompt for my password" / "execution blocked"
 
-The installer re-attaches your terminal for the credential prompt. If you piped through something that consumed stdin, run the two-step version instead:
+The one-liners handle the credential prompt automatically. If your environment blocks them (corporate-locked terminal, no controlling TTY, PowerShell execution policy), use the manual two-step path — works on every OS:
 
+**macOS / Linux:**
 ```bash
 git clone https://github.com/brettscharm/elm-mcp.git ~/.elm-mcp
 cd ~/.elm-mcp
 python3 setup.py
 ```
 
-Same result — `setup.py` is what `install.sh` calls anyway.
+**Windows (PowerShell):**
+```powershell
+git clone https://github.com/brettscharm/elm-mcp.git $HOME\.elm-mcp
+cd $HOME\.elm-mcp
+py setup.py
+```
+
+Same result — `setup.py` is the cross-platform workhorse the one-liners just wrap.
 
 ### "Modes didn't show up in the picker"
 
 Two checks:
 
-1. Did you fully quit Bob (Cmd+Q) and reopen? Modes load at startup only.
+1. Did you fully quit Bob and reopen? Modes load at startup only.
 2. Re-run just the mode install:
    ```bash
-   python3 ~/.elm-mcp/setup.py --modes-only
+   python3 ~/.elm-mcp/setup.py --modes-only      # macOS/Linux
+   py %USERPROFILE%\.elm-mcp\setup.py --modes-only   # Windows
    ```
    This re-installs the 5 modes without redoing the whole setup.
 
