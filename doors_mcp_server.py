@@ -79,7 +79,7 @@ load_dotenv()
 # decide if a newer GitHub release exists; the `connect_to_elm`
 # response also surfaces it so users always know what version they're
 # running.
-__version__ = "0.25.0"
+__version__ = "0.26.0"
 GITHUB_REPO = "brettscharm/elm-mcp"
 
 app = Server("elm-mcp")
@@ -5314,27 +5314,40 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="query_elm",
             description=(
-                "Unified natural-language query over DNG requirements. This "
-                "is the tool to reach for when the user asks to FIND / SHOW / "
-                "LIST requirements matching some description — 'approved reqs "
-                "owned by Sarah without tests', 'system requirements about "
-                "login', 'untested reqs in the auth module', 'req 12345'. "
-                "You (the LLM) translate the user's sentence into the "
-                "structured args below; the engine resolves human vocabulary "
-                "(approved/high/untested/unowned → the right attribute + "
-                "value, enum-code tolerant), picks the right backend "
-                "(by-id lookup / full-text / module scan), and returns a "
-                "consistent result set. Prefer this over hand-picking "
-                "get_module_requirements / search_requirements / "
-                "resolve_requirement_id — it routes to all three correctly. "
+                "Unified natural-language query across DNG requirements, "
+                "EWM work items, AND ETM test cases. Reach for this whenever "
+                "the user asks to FIND / SHOW / LIST artifacts matching some "
+                "description — 'approved reqs owned by Sarah without tests', "
+                "'open defects assigned to me', 'failed test cases', 'tasks "
+                "in the new state', 'req 12345'. You (the LLM) translate the "
+                "sentence into the structured args; the engine resolves human "
+                "vocabulary (approved/high/untested/open/failed → the right "
+                "attribute + value, enum-code tolerant), picks the backend "
+                "(by-id / full-text / module-scan for DNG; work-item query "
+                "for EWM; test-case query for ETM), and returns a consistent "
+                "result set. Set `domain` to pick the artifact type. "
                 "Read-only."
             ),
             inputSchema={
                 "type": "object",
                 "properties": {
+                    "domain": {
+                        "type": "string",
+                        "enum": ["dng", "ewm", "etm"],
+                        "description": (
+                            "Which artifact type to query: 'dng' "
+                            "(requirements, default), 'ewm' (work items: "
+                            "tasks/defects/stories), 'etm' (test cases). "
+                            "Pick based on what the user is asking for."
+                        )
+                    },
                     "project_identifier": {
                         "type": "string",
-                        "description": "DNG project number or name (required)."
+                        "description": (
+                            "Project number or name (required). For "
+                            "domain=ewm use the Change Management project, "
+                            "for domain=etm the Quality Management project."
+                        )
                     },
                     "module_identifier": {
                         "type": "string",
@@ -10339,12 +10352,16 @@ async def _dispatch_tool(name: str, arguments: Any) -> list[TextContent]:
                 return [TextContent(type="text",
                                      text="Error: project_identifier is required.")]
 
+            domain = (arguments.get("domain") or "dng").strip().lower()
+            if domain not in ("dng", "ewm", "etm"):
+                domain = "dng"
             intent = QueryIntent(
                 project=proj_id,
+                domain=domain,
                 module=(arguments.get("module_identifier") or "").strip() or None,
                 requirement_id=(arguments.get("requirement_id") or "").strip() or None,
                 text=(arguments.get("text") or "").strip() or None,
-                predicates=build_predicates(arguments.get("filters")),
+                predicates=build_predicates(arguments.get("filters"), domain),
                 limit=int(arguments.get("limit") or 200),
             )
 
@@ -10373,6 +10390,8 @@ async def _dispatch_tool(name: str, arguments: Any) -> list[TextContent]:
                 "resolve_by_id": "by-ID lookup",
                 "full_text_search": "full-text search",
                 "module_scan": "attribute filter",
+                "ewm_query": "EWM work-item query",
+                "etm_query": "ETM test-case query",
             }.get(backend, backend)
 
             lines = [
@@ -10388,20 +10407,28 @@ async def _dispatch_tool(name: str, arguments: Any) -> list[TextContent]:
                 title = r.get("title") or "(untitled)"
                 url = r.get("url", "")
                 rid = r.get("id", "")
-                atype = r.get("artifact_type", "")
                 mod = r.get("_module", "")
-                ca = r.get("custom_attributes") or {}
-                status = ca.get("Status", "")
                 bits = [f"**{title}**"]
                 meta = []
                 if rid:
                     meta.append(f"ID {rid}")
-                if atype:
-                    meta.append(atype)
-                if status:
-                    meta.append(f"Status: {status}")
-                if mod and not intent.module:
-                    meta.append(f"in {mod}")
+                if domain == "dng":
+                    atype = r.get("artifact_type", "")
+                    status = (r.get("custom_attributes") or {}).get("Status", "")
+                    if atype:
+                        meta.append(atype)
+                    if status:
+                        meta.append(f"Status: {status}")
+                    if mod and not intent.module:
+                        meta.append(f"in {mod}")
+                else:
+                    # EWM / ETM flat dicts — show state + type (trailing seg)
+                    state = (r.get("state") or "").rsplit("/", 1)[-1].rsplit(".", 1)[-1]
+                    wtype = (r.get("type") or "").rsplit("/", 1)[-1].rsplit(".", 1)[-1]
+                    if wtype:
+                        meta.append(wtype)
+                    if state:
+                        meta.append(f"state: {state}")
                 if meta:
                     bits.append("— " + " · ".join(meta))
                 line = f"{i}. " + " ".join(bits)

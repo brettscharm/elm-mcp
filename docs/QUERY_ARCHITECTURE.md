@@ -121,6 +121,30 @@ Reportable REST returns `<customAttribute name="Status" value="4" literalName="A
 | QueryIntent + vocab + planner + backends | ✅ v0.25.0 |
 | `query_elm` unified tool + Concierge/BOB.md routing | ✅ v0.25.0 |
 | `resolve_requirement_id` fixed (correct capability + prefix) | ✅ v0.25.0 |
+| EWM + ETM domain backends (`domain=ewm` / `domain=etm`) | ✅ v0.26.0 |
+| `query_work_items` fixed (Deliverable vs ChangeRequest capability) | ✅ v0.26.0 |
 | Refactor remaining read tools into thin engine facades | ⏳ future |
-| EWM / ETM domain backends | ⏳ future (engine is DNG today) |
 | Semantic search (embeddings) as a backend | ⏳ future |
+
+## Domains (v0.26.0)
+
+`query_elm` spans all three ELM artifact types via the `domain` arg:
+
+| domain | artifacts | backend | vocabulary |
+|---|---|---|---|
+| `dng` (default) | requirements | by-id / full-text / module-scan | approved, high, untested, unowned, system requirement, … |
+| `ewm` | work items | work-item query + client filter | open/closed, new/in progress/done, tasks/defects/stories, assigned to X |
+| `etm` | test cases | test-case query + client filter | passed/failed/blocked, not run |
+
+EWM/ETM results are flat dicts (id/title/state/type/owner); the engine
+post-filters them client-side on those fields. EWM `open`/`closed` is
+narrowed server-side via `oslc_cm:closed`.
+
+### A 6th OSLC gotcha (EWM)
+
+The EWM `workitems/services.xml` lists TWO query capabilities:
+**Deliverable** (`cm#Deliverable`, listed FIRST) and **work items**
+(`cm#ChangeRequest`, second). Picking the first — the old
+`query_work_items` bug — queried `/deliverables` and always returned 0
+work items. Select the `ChangeRequest` capability (or the base ending in
+`/workitems`). Same class of bug as the DNG capability-selection one.

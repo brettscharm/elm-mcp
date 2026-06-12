@@ -81,6 +81,7 @@ _ATTR_ALIASES: Dict[str, str] = {
 
 # Whole-phrase shortcuts → a complete predicate. These capture the
 # common "untested" / "unowned" style asks that map to link-absence.
+# DNG-oriented (validatedBy / Owner / trackedBy live on requirements).
 _PHRASE_PREDICATES: Dict[str, Pred] = {
     "untested": Pred("validatedBy", OP_MISSING),
     "no tests": Pred("validatedBy", OP_MISSING),
@@ -96,31 +97,72 @@ _PHRASE_PREDICATES: Dict[str, Pred] = {
     "no work items": Pred("trackedBy", OP_MISSING),
 }
 
+# EWM (work item) attribute aliases + phrase shortcuts. EWM results are
+# flat dicts (id, title, state, type, owner) — see _run_ewm.
+_EWM_ATTR_ALIASES: Dict[str, str] = {
+    "status": "state", "state": "state",
+    "type": "type", "kind": "type", "workitem type": "type",
+    "owner": "owner", "owned by": "owner", "assignee": "owner",
+    "assigned to": "owner", "title": "title", "summary": "title",
+}
+_EWM_PHRASES: Dict[str, Pred] = {
+    "open": Pred("_open", OP_EQ, True),     # handled server-side
+    "closed": Pred("_open", OP_EQ, False),
+    "done": Pred("state", OP_EQ, "Done"),
+    "in progress": Pred("state", OP_CONTAINS, "Progress"),
+    "new": Pred("state", OP_EQ, "New"),
+    "defects": Pred("type", OP_CONTAINS, "defect"),
+    "tasks": Pred("type", OP_CONTAINS, "task"),
+    "stories": Pred("type", OP_CONTAINS, "story"),
+}
 
-def normalize_attr(name: str) -> str:
-    """Canonicalize a human attribute name. Unknown names pass through
-    unchanged (so project-specific custom attributes still work)."""
+# ETM (test) attribute aliases + phrase shortcuts.
+_ETM_ATTR_ALIASES: Dict[str, str] = {
+    "status": "state", "state": "state", "result": "state",
+    "title": "title", "name": "title",
+}
+_ETM_PHRASES: Dict[str, Pred] = {
+    "passed": Pred("state", OP_CONTAINS, "pass"),
+    "failed": Pred("state", OP_CONTAINS, "fail"),
+    "blocked": Pred("state", OP_CONTAINS, "block"),
+    "not run": Pred("state", OP_MISSING),
+    "unexecuted": Pred("state", OP_MISSING),
+}
+
+
+def normalize_attr(name: str, domain: str = "dng") -> str:
+    """Canonicalize a human attribute name for a domain. Unknown names
+    pass through unchanged (so project-specific attributes still work)."""
     if not name:
         return name
     key = str(name).strip().lower()
+    if domain == "ewm":
+        return _EWM_ATTR_ALIASES.get(key, name)
+    if domain == "etm":
+        return _ETM_ATTR_ALIASES.get(key, name)
     return _ATTR_ALIASES.get(key, name)
 
 
-def resolve_phrase(phrase: str) -> Optional[Pred]:
-    """Map a whole-phrase shortcut ('untested', 'unowned') to a Pred."""
+def resolve_phrase(phrase: str, domain: str = "dng") -> Optional[Pred]:
+    """Map a whole-phrase shortcut to a Pred, per domain."""
     if not phrase:
         return None
-    return _PHRASE_PREDICATES.get(str(phrase).strip().lower())
+    key = str(phrase).strip().lower()
+    if domain == "ewm" and key in _EWM_PHRASES:
+        return _EWM_PHRASES[key]
+    if domain == "etm" and key in _ETM_PHRASES:
+        return _ETM_PHRASES[key]
+    # DNG phrases also available as a fallback for any domain
+    return _PHRASE_PREDICATES.get(key)
 
 
-def build_predicates(raw: Any) -> List[Pred]:
-    """Turn loosely-typed filter input from the tool into canonical Preds.
+def build_predicates(raw: Any, domain: str = "dng") -> List[Pred]:
+    """Turn loosely-typed filter input into canonical Preds for a domain.
 
     Accepts any of:
-      - list of dicts: [{"attribute": "Status", "operator": "eq",
-                          "value": "Approved"}]
       - dict: {"Status": "Approved", "title_contains": "login"}
-      - list of phrase strings: ["untested", "approved"]  (mixed ok)
+      - list of structured preds: [{"attribute","operator","value"}]
+      - list of phrase strings: ["untested", "open", "failed"]  (mixed ok)
     """
     out: List[Pred] = []
     if raw is None:
@@ -130,28 +172,27 @@ def build_predicates(raw: Any) -> List[Pred]:
         for k, v in raw.items():
             key = str(k)
             if key.endswith("_contains"):
-                out.append(Pred(normalize_attr(key[:-len("_contains")]),
+                out.append(Pred(normalize_attr(key[:-len("_contains")], domain),
                                  OP_CONTAINS, v))
             else:
-                out.append(Pred(normalize_attr(key), OP_EQ, v))
+                out.append(Pred(normalize_attr(key, domain), OP_EQ, v))
         return out
 
     if isinstance(raw, list):
         for item in raw:
             if isinstance(item, str):
-                ph = resolve_phrase(item)
+                ph = resolve_phrase(item, domain)
                 if ph:
                     out.append(ph)
                 continue
             if isinstance(item, dict):
-                # structured form
                 attr = item.get("attribute") or item.get("attr") or ""
                 op = (item.get("operator") or item.get("op") or OP_EQ).lower()
                 if op not in _VALID_OPS:
                     op = OP_EQ
                 val = item.get("value")
                 if attr:
-                    out.append(Pred(normalize_attr(attr), op, val))
+                    out.append(Pred(normalize_attr(attr, domain), op, val))
         return out
 
     return out
@@ -210,17 +251,94 @@ def _apply_postproc(reqs: List[Dict], postproc: List[Pred]) -> List[Dict]:
     return reqs
 
 
+def _match_flat(item: Dict, pred: Pred) -> bool:
+    """Client-side predicate match for the FLAT dicts EWM/ETM return
+    (id, title, state, type, owner — no custom_attributes nesting)."""
+    if pred.attr.startswith("_"):
+        return True  # server-side pseudo-attr (e.g. _open), already applied
+    raw = item.get(pred.attr, "")
+    # EWM state/type come back as URIs; compare on the trailing segment too
+    actual = str(raw or "")
+    tail = actual.rsplit("/", 1)[-1].rsplit(".", 1)[-1]
+    candidates = {actual.strip().lower(), tail.strip().lower()}
+    want = str(pred.value).strip().lower() if pred.value is not None else ""
+    if pred.op == OP_CONTAINS:
+        return any(want in c for c in candidates)
+    if pred.op == OP_MISSING:
+        return not (actual.strip())
+    if pred.op == OP_EXISTS:
+        return bool(actual.strip())
+    if pred.op == OP_NEQ:
+        return want not in candidates
+    # eq / in
+    if isinstance(pred.value, (list, tuple)):
+        wants = {str(w).strip().lower() for w in pred.value}
+        return bool(candidates & wants)
+    return want in candidates
+
+
+def _run_ewm(client: Any, intent: QueryIntent) -> Dict[str, Any]:
+    notes: List[str] = []
+    ewm_projects = client.list_ewm_projects()
+    project = _find(ewm_projects, intent.project)
+    if not project:
+        return {"backend": "ewm_query", "results": [], "count": 0,
+                "notes": [f"EWM project not found: '{intent.project}'"]}
+    # Server-side narrowing: open/closed pseudo-attr → oslc_cm:closed
+    where = ""
+    for p in intent.predicates:
+        if p.attr == "_open":
+            where = ("oslc_cm:closed=false" if p.value
+                     else "oslc_cm:closed=true")
+    items = client.query_work_items(
+        ewm_project_url=project["url"], where=where, select="*",
+        page_size=min(intent.limit, 200)) or []
+    # Client-side filter on the remaining predicates (state/type/owner/title)
+    postpreds = [p for p in intent.predicates if not p.attr.startswith("_")]
+    for p in postpreds:
+        items = [it for it in items if _match_flat(it, p)]
+    if where:
+        notes.append(f"Server-side narrowed via `{where}`.")
+    return {"backend": "ewm_query",
+            "results": items[:intent.limit], "count": len(items),
+            "notes": notes}
+
+
+def _run_etm(client: Any, intent: QueryIntent) -> Dict[str, Any]:
+    notes: List[str] = []
+    etm_projects = client.list_etm_projects()
+    project = _find(etm_projects, intent.project)
+    if not project:
+        return {"backend": "etm_query", "results": [], "count": 0,
+                "notes": [f"ETM project not found: '{intent.project}'"]}
+    cases = client.list_test_cases(project["url"],
+                                    max_results=min(intent.limit, 200)) or []
+    for p in intent.predicates:
+        if p.attr.startswith("_"):
+            continue
+        cases = [tc for tc in cases if _match_flat(tc, p)]
+    return {"backend": "etm_query",
+            "results": cases[:intent.limit], "count": len(cases),
+            "notes": notes}
+
+
 def execute(client: Any, intent: QueryIntent) -> Dict[str, Any]:
     """Run a QueryIntent and return normalized results.
 
     Returns:
       {
         "backend": <which path ran>,
-        "results": [ {id, title, url, artifact_type, status, ...}, ... ],
+        "results": [ {id, title, url, ...}, ... ],
         "count": N,
-        "notes": [ ... human-readable notes about what happened ],
+        "notes": [ ... human-readable notes ... ],
       }
     """
+    # ── Domain routing ───────────────────────────────────────
+    if intent.domain == "ewm":
+        return _run_ewm(client, intent)
+    if intent.domain == "etm":
+        return _run_etm(client, intent)
+
     notes: List[str] = []
 
     # Resolve the project (name/number → record)

@@ -4729,13 +4729,32 @@ class DOORSNextClient:
                 return []
             sproot = ET.fromstring(sp_resp.content)
             ns = self._NS_OSLC
+            # EWM's workitems services.xml lists TWO query capabilities:
+            # Deliverable (FIRST) and ChangeRequest (the work items —
+            # SECOND). Picking the first (the old bug) queried
+            # /deliverables and always returned 0 work items. Select the
+            # ChangeRequest capability, or fall back to the base whose URL
+            # ends in /workitems. Fixed in v0.26.0.
+            cm_changerequest = 'http://open-services.net/ns/cm#ChangeRequest'
             query_base = ''
+            fallback = ''
             for qc in sproot.findall('.//oslc:QueryCapability', ns):
                 qb = qc.find('oslc:queryBase', ns)
-                if qb is not None:
-                    query_base = qb.get(f'{{{ns["rdf"]}}}resource', '')
-                    if query_base:
-                        break
+                if qb is None:
+                    continue
+                base_url = qb.get(f'{{{ns["rdf"]}}}resource', '')
+                if not base_url:
+                    continue
+                res_types = [
+                    e.get(f'{{{ns["rdf"]}}}resource', '')
+                    for e in qc.findall('oslc:resourceType', ns)
+                ]
+                if cm_changerequest in res_types or base_url.endswith('/workitems'):
+                    query_base = base_url
+                    break
+                if not fallback:
+                    fallback = base_url
+            query_base = query_base or fallback
             if not query_base:
                 return []
         except Exception:
