@@ -72,17 +72,33 @@ cd "$INSTALL_DIR"
 # skip credential entry. Re-attach stdin to the user's terminal so
 # prompts actually work. If we're already in a terminal (no pipe),
 # do nothing special.
-if [ -t 0 ]; then
-  "$PY" setup.py
-elif [ -e /dev/tty ]; then
-  "$PY" setup.py < /dev/tty
-else
-  # No terminal available at all — non-interactive environment (CI,
-  # Docker without -t, etc.). Run setup but warn the user that they'll
-  # need to add credentials manually.
-  printf "  %sNo terminal available — credentials will need to be added manually to ~/.elm-mcp/.env%s\n" "$DIM" "$RESET"
-  "$PY" setup.py
-fi
+#
+# We must test that /dev/tty is actually USABLE, not just that it
+# exists. On CI runners, Docker without -t, some SSH sessions, and
+# scripted installs, /dev/tty exists but opening it fails with
+# "Device not configured" — and `setup.py < /dev/tty` would abort the
+# whole install before deps/config/modes ever run. Probe it for real.
+run_setup() {
+  if [ -t 0 ]; then
+    # Already attached to a terminal — prompts work as-is.
+    "$PY" setup.py
+  elif ( : < /dev/tty ) 2>/dev/null; then
+    # /dev/tty is openable — re-attach it so credential prompts work
+    # even though our own stdin is the curl pipe.
+    "$PY" setup.py < /dev/tty
+  else
+    # No usable terminal (CI, Docker w/o -t, scripted). Run setup
+    # anyway — deps, host config, smoke test, and modes still install;
+    # only the interactive credential prompt is skipped (setup.py
+    # handles EOF gracefully). Tell the user how to add creds after.
+    printf "  %sNo usable terminal — skipping the interactive credential prompt.%s\n" "$DIM" "$RESET"
+    printf "  %sEverything else (server + modes) still installs. Add credentials after with:%s\n" "$DIM" "$RESET"
+    printf "    %s%s setup.py%s   (run from %s, it'll prompt)\n" "$BOLD" "$PY" "$RESET" "$INSTALL_DIR"
+    printf "  %sor edit %s/.env directly (ELM_URL / ELM_USERNAME / ELM_PASSWORD).%s\n" "$DIM" "$INSTALL_DIR" "$RESET"
+    "$PY" setup.py < /dev/null
+  fi
+}
+run_setup
 
 # ── Done ─────────────────────────────────────────────────────
 step "[4/4] Done — and here's the manual-fallback info"
