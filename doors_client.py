@@ -487,7 +487,16 @@ class DOORSNextClient:
         for cand in candidates:
             try:
                 params = {
-                    'oslc.where': f'dcterms:identifier="{cand}"',
+                    # DNG's OSLC query requires every namespace prefix used
+                    # in where/select to be DECLARED via oslc.prefix —
+                    # otherwise the server 400s with "Undefined namespace
+                    # prefix: dcterms". This declaration was missing, which
+                    # (together with the wrong query capability) is why
+                    # resolve_requirement_id always returned "not found".
+                    # Fixed in v0.25.0. Identifier is an integer literal —
+                    # no quotes.
+                    'oslc.prefix': 'dcterms=<http://purl.org/dc/terms/>',
+                    'oslc.where': f'dcterms:identifier={cand}',
                     'oslc.select': 'dcterms:identifier,dcterms:title',
                     'oslc.pageSize': '5',
                 }
@@ -551,16 +560,35 @@ class DOORSNextClient:
                 return ''
             root = ET.fromstring(resp.content)
             ns = self._NS_OSLC
-            # Find the QueryCapability whose resourceType is Requirement
+            rm_req_type = 'http://open-services.net/ns/rm#Requirement'
+            fallback = ''
+            # Find the QueryCapability whose resourceType is the RM
+            # Requirement type. The services doc lists MANY capabilities
+            # (AttributeType, LinkType, Folder, View, …) and the
+            # Requirement one is NOT first — picking the first (the old
+            # bug) returned attributeTypeQuery, so resolve_requirement_id
+            # and every OSLC attribute query 400'd. Fixed in v0.25.0.
             for qc in root.findall('.//oslc:QueryCapability', ns):
                 base_el = qc.find('oslc:queryBase', ns)
                 if base_el is None:
                     continue
                 base_url = base_el.get(f'{{{ns["rdf"]}}}resource', '')
-                # Use first one — Requirement is the dominant case in DNG
-                if base_url:
+                if not base_url:
+                    continue
+                res_types = [
+                    e.get(f'{{{ns["rdf"]}}}resource', '')
+                    for e in qc.findall('oslc:resourceType', ns)
+                ]
+                if rm_req_type in res_types:
                     self._query_cap_cache[project_url] = base_url
                     return base_url
+                if not fallback:
+                    fallback = base_url
+            # No Requirement-typed capability found — fall back to the
+            # first (better than nothing for older DNG service docs).
+            if fallback:
+                self._query_cap_cache[project_url] = fallback
+                return fallback
         except Exception:
             return ''
         return ''

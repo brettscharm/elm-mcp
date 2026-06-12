@@ -79,7 +79,7 @@ load_dotenv()
 # decide if a newer GitHub release exists; the `connect_to_elm`
 # response also surfaces it so users always know what version they're
 # running.
-__version__ = "0.24.2"
+__version__ = "0.25.0"
 GITHUB_REPO = "brettscharm/elm-mcp"
 
 app = Server("elm-mcp")
@@ -5312,6 +5312,82 @@ async def list_tools() -> list[Tool]:
             }
         ),
         Tool(
+            name="query_elm",
+            description=(
+                "Unified natural-language query over DNG requirements. This "
+                "is the tool to reach for when the user asks to FIND / SHOW / "
+                "LIST requirements matching some description — 'approved reqs "
+                "owned by Sarah without tests', 'system requirements about "
+                "login', 'untested reqs in the auth module', 'req 12345'. "
+                "You (the LLM) translate the user's sentence into the "
+                "structured args below; the engine resolves human vocabulary "
+                "(approved/high/untested/unowned → the right attribute + "
+                "value, enum-code tolerant), picks the right backend "
+                "(by-id lookup / full-text / module scan), and returns a "
+                "consistent result set. Prefer this over hand-picking "
+                "get_module_requirements / search_requirements / "
+                "resolve_requirement_id — it routes to all three correctly. "
+                "Read-only."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "project_identifier": {
+                        "type": "string",
+                        "description": "DNG project number or name (required)."
+                    },
+                    "module_identifier": {
+                        "type": "string",
+                        "description": (
+                            "Optional — narrow to one module. Omit to scan "
+                            "every module in the project."
+                        )
+                    },
+                    "requirement_id": {
+                        "type": "string",
+                        "description": (
+                            "Optional — look up ONE requirement by its short "
+                            "ID (e.g. '12345' or 'REQ-12345'). Takes priority "
+                            "over filters/text."
+                        )
+                    },
+                    "text": {
+                        "type": "string",
+                        "description": (
+                            "Optional — free-text search across the project "
+                            "(routes to full-text). Use when the user wants "
+                            "'mentioning X' / 'about X' rather than a precise "
+                            "attribute filter."
+                        )
+                    },
+                    "filters": {
+                        "description": (
+                            "Optional — the attribute predicates. Three "
+                            "accepted shapes (use whichever maps cleanest "
+                            "from the user's words):\n"
+                            "  • dict: {\"Status\":\"Approved\", "
+                            "\"title_contains\":\"login\"}\n"
+                            "  • list of structured preds: [{\"attribute\":"
+                            "\"Priority\",\"operator\":\"eq\",\"value\":"
+                            "\"High\"}]\n"
+                            "  • list of phrase shortcuts: [\"untested\", "
+                            "\"unowned\", \"approved\"]\n"
+                            "Operators: eq, neq, contains, in, missing, "
+                            "exists. Human values are fine — 'approved', "
+                            "'high', 'StateApproved' all resolve. Phrase "
+                            "shortcuts: untested/no tests, unowned/no owner, "
+                            "tested, owned, untracked."
+                        )
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max results (default 200)."
+                    }
+                },
+                "required": ["project_identifier"]
+            }
+        ),
+        Tool(
             name="find_traceability_gaps",
             description=(
                 "Scan a DNG project (optionally including linked EWM/ETM) "
@@ -7618,6 +7694,7 @@ async def _dispatch_tool(name: str, arguments: Any) -> list[TextContent]:
                 "Traceability audit": ["find_traceability_gaps"],
                 "Compliance": ["generate_compliance_packet"],
                 "Docs lookup": ["get_elm_docs_links"],
+                "Unified query": ["query_elm"],
             }
 
             tool_descs = {
@@ -10246,6 +10323,93 @@ async def _dispatch_tool(name: str, arguments: Any) -> list[TextContent]:
                 f"'NIST 800-53 IA-2' or 'IEC 62304 §5.3.3' to artifact "
                 f"titles or attributes to improve detection._"
             ))]
+
+        elif name == "query_elm":
+            try:
+                from query_engine import QueryIntent, execute, build_predicates
+            except Exception as e:
+                return [TextContent(type="text",
+                                     text=f"Failed to load query_engine: {e}")]
+            if not client:
+                return [TextContent(type="text", text=(
+                    "Not connected to ELM. Call `connect_to_elm` first."
+                ))]
+            proj_id = (arguments.get("project_identifier") or "").strip()
+            if not proj_id:
+                return [TextContent(type="text",
+                                     text="Error: project_identifier is required.")]
+
+            intent = QueryIntent(
+                project=proj_id,
+                module=(arguments.get("module_identifier") or "").strip() or None,
+                requirement_id=(arguments.get("requirement_id") or "").strip() or None,
+                text=(arguments.get("text") or "").strip() or None,
+                predicates=build_predicates(arguments.get("filters")),
+                limit=int(arguments.get("limit") or 200),
+            )
+
+            try:
+                out = execute(client, intent)
+            except Exception as e:
+                return [TextContent(type="text",
+                                     text=f"query_elm failed: {e}")]
+
+            results = out["results"]
+            backend = out["backend"]
+            notes = out.get("notes", [])
+
+            if not results:
+                msg = ["# No matching requirements\n"]
+                if notes:
+                    msg.append("\n".join(f"_{n}_" for n in notes))
+                else:
+                    msg.append("_The query ran but nothing matched. Try "
+                                "loosening a filter, or use `text` for a "
+                                "broader full-text search._")
+                return [TextContent(type="text", text="\n".join(msg))]
+
+            # Describe what ran (transparency about the routing)
+            backend_label = {
+                "resolve_by_id": "by-ID lookup",
+                "full_text_search": "full-text search",
+                "module_scan": "attribute filter",
+            }.get(backend, backend)
+
+            lines = [
+                f"# Query results — {out['count']} match(es)",
+                f"_via {backend_label}_\n",
+            ]
+            for n in notes:
+                lines.append(f"> {n}")
+            if notes:
+                lines.append("")
+
+            for i, r in enumerate(results, 1):
+                title = r.get("title") or "(untitled)"
+                url = r.get("url", "")
+                rid = r.get("id", "")
+                atype = r.get("artifact_type", "")
+                mod = r.get("_module", "")
+                ca = r.get("custom_attributes") or {}
+                status = ca.get("Status", "")
+                bits = [f"**{title}**"]
+                meta = []
+                if rid:
+                    meta.append(f"ID {rid}")
+                if atype:
+                    meta.append(atype)
+                if status:
+                    meta.append(f"Status: {status}")
+                if mod and not intent.module:
+                    meta.append(f"in {mod}")
+                if meta:
+                    bits.append("— " + " · ".join(meta))
+                line = f"{i}. " + " ".join(bits)
+                if url:
+                    line += f"\n   {url}"
+                lines.append(line)
+
+            return [TextContent(type="text", text="\n".join(lines))]
 
         elif name == "find_traceability_gaps":
             try:

@@ -97,8 +97,14 @@ customModes:
       ├──────────────────────────────────────────┼──────────────────────────┤
       │ "Build from this [PDF/epic/module]"      │ /build-from-existing     │
       ├──────────────────────────────────────────┼──────────────────────────┤
-      │ "Show / list / read reqs in [module]"    │ get_module_requirements  │
-      │ (no plan/push intent)                    │                          │
+      │ "Find / show / list reqs matching <any   │ query_elm                │
+      │ description>" — 'approved reqs owned by   │ (unified NL query —      │
+      │ Sarah without tests', 'system reqs about  │  resolves vocabulary,    │
+      │ login', 'untested reqs', 'req 12345'.     │  routes to by-id /       │
+      │ ANY find-requirements-by-criteria ask.    │  full-text / filter)     │
+      ├──────────────────────────────────────────┼──────────────────────────┤
+      │ "Show / list / read ALL reqs in [module]" │ get_module_requirements  │
+      │ (whole module, no criteria)              │                          │
       ├──────────────────────────────────────────┼──────────────────────────┤
       │ "List projects" / "what projects do I    │ list_projects            │
       │ have"                                    │                          │
