@@ -26,20 +26,17 @@ Whatever your role — business analyst, systems engineer, QA or dev lead, or ju
 | 5 | [Create work items & test cases](lab-05-create-work-items/) | 15 min | `create_elm` — preview-first, linked to requirements |
 | 6 | [Connect the chain](lab-06-connect-the-chain/) | 20 min | req → task → test traceability + find the gaps |
 
-### Part 4 · Analysis & assurance *(coming soon)*
-| # | Lab | Topic | Tool status |
+### Part 4 · Analysis & assurance
+| # | Lab | Time | Outcome |
 |---|---|---|---|
-| 7 | Find the gaps | `find_traceability_gaps` — untested / unowned / orphans | ✅ ships today |
-| 8 | Change impact | `analyze_change_impact` — blast radius before you modify | ✅ ships today |
-| 9 | Audit-ready compliance | `generate_compliance_packet` — NIST 800-53 / IEC 62304 | ✅ ships today |
+| 7 | [Find the gaps](lab-07-find-the-gaps/) | 15 min | `find_traceability_gaps` — untested / unowned / premature work |
+| 8 | [Change impact](lab-08-change-impact/) | 20 min | `analyze_change_impact` — blast radius before you modify |
+| 9 | [Audit-ready compliance](lab-09-compliance/) | 25 min | `generate_compliance_packet` — NIST 800-53 / IEC 62304 |
 
-### Part 5 · Putting it together *(coming soon)*
-| # | Lab | Topic | Tool status |
+### Part 5 · Putting it together
+| # | Lab | Time | Outcome |
 |---|---|---|---|
-| 10 | Import a document | PDF / Word / pasted spec → DNG | ✅ ships today |
-| 11 | Capstone — build a project end to end | `/build-new-project` (or build from the doc in Lab 10) | ✅ ships today |
-
-> **"Coming soon" means the lab walkthrough, not the capability.** Every tool above already ships and is tested live — Labs 7–11 just formalize a guided walkthrough. Parts 1–3 (Labs 1–6) are written and verified.
+| 10 | [Capstone — build a project end to end](lab-10-capstone/) | 30–45 min | `/build-new-project` — idea → reqs → tasks → tests → code, with review gates |
 
 ---
 
@@ -47,7 +44,7 @@ Whatever your role — business analyst, systems engineer, QA or dev lead, or ju
 
 - **Parts 1–2 (Labs 1–3):** ~45 min — get running + the headline value. Enough for an evaluator.
 - **Parts 1–3 (Labs 1–6):** ~95 min — the full productive foundation.
-- **Full series (Labs 1–11):** ~4 hours.
+- **Full series (Labs 1–10):** ~3.5 hours.
 
 ---
 

@@ -112,6 +112,6 @@ Re-run the gap check — that requirement drops off the untested list. That's th
 
 ## What's next
 
-→ Part 4 · Analysis & assurance *(coming soon)* — **Lab 7: Find the gaps** (deeper), **Lab 8: Change impact**, **Lab 9: Audit-ready compliance**.
+→ [Lab 7: Find the gaps](../lab-07-find-the-gaps/)
 
-You've completed **Parts 1–3** — the core of using elm-mcp: get running, find anything, write requirements, create work items and tests, and connect the traceability chain. That's the productive foundation. The Analysis & Assurance labs (gaps, impact, compliance) and the capstone build go deeper from here.
+You've completed **Parts 1–3** — the productive foundation: get running, find anything, write requirements, create work items and tests, and connect the traceability chain. **Part 4 (Analysis & assurance)** goes deeper — finding gaps across a whole project, analyzing change impact, and generating audit-ready compliance packets.
