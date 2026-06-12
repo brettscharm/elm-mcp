@@ -1,8 +1,10 @@
-# Lab 6: Plan + Push requirements
+# Lab 4: Write requirements that pass review
 
-**Time:** 30 minutes
-**Prerequisites:** [Lab 5](../lab-05-read-requirements/) complete (DNG read flow understood)
-**Learning objective:** Run a full Plan Mode session against a feature description and push the polished requirements to a sandbox DNG module.
+**Part 3 · Doing the work**
+**Time:** 30 minutes · **Prerequisites:** [Lab 3](../lab-03-find-anything/) complete
+**Outcome:** Run a full Plan Mode session against a feature description and push the polished, lint-clean requirements to a sandbox DNG module.
+
+This is the flagship workflow — Bob acts like a senior systems engineer in a requirements review, drilling each requirement until it's testable and specific, then committing the batch.
 
 ---
 
@@ -256,19 +258,6 @@ If you want to revise existing reqs (not draft new ones), pick authorship option
 
 ## What's next
 
-You finished the v0.23.0 onboarding series. 🎉
+→ [Lab 5: Create work items & test cases](../lab-05-create-work-items/)
 
-**Coming next** in upcoming releases:
-
-- **Lab 7** — Work items (EWM): query + create + transition workflow states
-- **Lab 8** — Test cases (ETM): list + create + link to a req
-- **Lab 9** — Cross-artifact (req ↔ WI ↔ TC): build the trace chain
-- **Lab 10** — Traceability gaps: audit-readiness check
-- **Lab 11** — Change impact analysis: 🎯 Impact Analyst
-- **Lab 12** — Excel export
-- **Lab 13** — Compliance packets: 📜 Compliance Auditor
-- **Lab 14** — The build-project flow
-- **Lab 15** — Bonus: ELM docs lookup
-- **Lab 16** — Capstone: real-world scenario
-
-Check https://github.com/brettscharm/elm-mcp/releases for new lab releases. Each release adds 1-3 labs.
+You've written and pushed requirements. Next: create the EWM tasks and ETM test cases that implement and verify them — in natural language, with a safety preview before anything is written.
