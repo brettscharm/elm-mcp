@@ -78,22 +78,31 @@ cd "$INSTALL_DIR"
 # scripted installs, /dev/tty exists but opening it fails with
 # "Device not configured" — and `setup.py < /dev/tty` would abort the
 # whole install before deps/config/modes ever run. Probe it for real.
+# Open the real terminal on fd 3 ONLY if it's genuinely usable, then
+# feed that to setup.py. Doing the open in the current shell (not a
+# subshell probe) means the test and the use are the SAME operation —
+# they can't disagree. A subshell probe like `( : < /dev/tty )` can
+# report "openable" in nested pipe contexts where the actual redirect
+# then fails with "Device not configured", aborting the install. The
+# `{ exec 3<...; } 2>/dev/null` form fails safe: if the open fails the
+# condition is false (no abort), and stderr is swallowed.
 run_setup() {
   if [ -t 0 ]; then
     # Already attached to a terminal — prompts work as-is.
     "$PY" setup.py
-  elif ( : < /dev/tty ) 2>/dev/null; then
-    # /dev/tty is openable — re-attach it so credential prompts work
-    # even though our own stdin is the curl pipe.
-    "$PY" setup.py < /dev/tty
+  elif { exec 3</dev/tty; } 2>/dev/null; then
+    # Real terminal opened on fd 3 — feed it to setup.py so credential
+    # prompts work even though our own stdin is the curl pipe.
+    "$PY" setup.py <&3
+    exec 3<&-
   else
-    # No usable terminal (CI, Docker w/o -t, scripted). Run setup
-    # anyway — deps, host config, smoke test, and modes still install;
-    # only the interactive credential prompt is skipped (setup.py
-    # handles EOF gracefully). Tell the user how to add creds after.
+    # No usable terminal (CI, Docker w/o -t, scripted, nested pipes).
+    # Everything still installs — deps, host config, smoke test, AND
+    # the modes. Only the interactive credential prompt is skipped
+    # (setup.py handles EOF gracefully). Show how to add creds after.
     printf "  %sNo usable terminal — skipping the interactive credential prompt.%s\n" "$DIM" "$RESET"
-    printf "  %sEverything else (server + modes) still installs. Add credentials after with:%s\n" "$DIM" "$RESET"
-    printf "    %s%s setup.py%s   (run from %s, it'll prompt)\n" "$BOLD" "$PY" "$RESET" "$INSTALL_DIR"
+    printf "  %sEverything else (server + all tools + modes) still installs.%s\n" "$DIM" "$RESET"
+    printf "  %sAdd credentials after with: %s%s setup.py%s %s(run from %s)%s\n" "$DIM" "$BOLD" "$PY" "$RESET" "$DIM" "$INSTALL_DIR" "$RESET"
     printf "  %sor edit %s/.env directly (ELM_URL / ELM_USERNAME / ELM_PASSWORD).%s\n" "$DIM" "$INSTALL_DIR" "$RESET"
     "$PY" setup.py < /dev/null
   fi
