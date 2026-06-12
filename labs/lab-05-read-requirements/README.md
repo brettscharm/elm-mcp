@@ -12,6 +12,8 @@ This lab covers the core DNG read flow: navigate projects → modules → requir
 
 Read-only — no writes to DNG.
 
+> **Shortcut (v0.25.0+):** the steps below use the individual read tools so you understand the pieces. In day-to-day use you can just ask in plain English and Concierge routes to **`query_elm`** — the unified query that resolves vocabulary ("approved", "untested", "high priority") and picks the right backend for you. Example: *"show me the approved requirements about conversion in the temperature converter."* This lab teaches the building blocks; `query_elm` is the fast path once you know them.
+
 ---
 
 ## Steps
@@ -96,7 +98,7 @@ What's req <ID> in <your project>?
 
 Concierge routes to `resolve_requirement_id`. Returns the URL + title.
 
-> Note: This tool has a known issue (see audit notes) where some DNG deployments need a specific OSLC query variant. If you get a "no requirement found" response on an ID you know exists, that's the known bug — it's tracked at https://github.com/brettscharm/elm-mcp/issues.
+> **Fixed in v0.25.0:** earlier versions queried the wrong OSLC capability and omitted a required namespace-prefix declaration, so this returned "no requirement found" for valid IDs. As of v0.25.0 it resolves correctly. On an older version? Run `update_elm_mcp`.
 
 ---
 
@@ -138,7 +140,7 @@ That's expected on a project with cross-app references. The DNG full-text search
 
 ### "Resolve_requirement_id says 'no req found' for a valid ID"
 
-Known issue. Track at https://github.com/brettscharm/elm-mcp/issues. Workaround: use `search_requirements` with the ID as a search term, or use the full URL directly in subsequent calls.
+Fixed in **v0.25.0** (wrong OSLC query capability + missing prefix declaration). If you still see this, you're on an older build — run `update_elm_mcp` and retry.
 
 ---
 

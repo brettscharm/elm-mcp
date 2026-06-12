@@ -19,20 +19,20 @@ A hands-on tutorial sequence that takes you from zero to comfortable using elm-m
 | 5 | [Read requirements (DNG)](lab-05-read-requirements/) | 15 min | Browse modules, get + filter + search requirements |
 | 6 | [Plan + Push requirements](lab-06-plan-push/) | 30 min | Full Plan Mode session → batch push to DNG → automatic audit |
 
-**Coming in v0.23.x** (staged based on user feedback):
+**Coming next** (staged based on user feedback). Many of these capabilities already SHIP as tools you can use today — the labs just formalize a walkthrough:
 
-| # | Lab | Topic |
-|---|---|---|
-| 7 | Work items (EWM) | `query_work_items`, `create_task`, `transition_work_item` |
-| 8 | Test cases (ETM) | `list_test_cases`, `create_test_case`, linking to a req |
-| 9 | Cross-artifact (req ↔ WI ↔ TC) | The value loop — build a full trace chain |
-| 10 | Find traceability gaps | `find_traceability_gaps` audit-readiness check |
-| 11 | Change impact analysis | 🎯 Impact Analyst — HTML report + Cytoscape graph |
-| 12 | Export to Excel | `export_module_to_xlsx` for non-ELM stakeholders |
-| 13 | Compliance packet | 📜 Compliance Auditor — NIST 800-53 or IEC 62304 |
-| 14 | The build-project flow | `/build-new-project` end-to-end |
-| 15 | Bonus: ELM docs lookup | `get_elm_docs_links` — never get a dead URL again |
-| 16 | Capstone | Real-world scenario: Jira → reqs → tests → impact → compliance |
+| # | Lab | Topic | Tool status |
+|---|---|---|---|
+| 7 | Natural-language queries | `query_elm` across DNG/EWM/ETM — "approved reqs without tests" | ✅ shipped (v0.26.0) |
+| 8 | Semantic search | `find_similar_requirements` — find by meaning, dedup | ✅ shipped (v0.27.0) |
+| 9 | Create in natural language | `create_elm` — preview-first task/test creation | ✅ shipped (v0.29.0) |
+| 10 | Find traceability gaps | `find_traceability_gaps` audit-readiness check | ✅ shipped (v0.19.0) |
+| 11 | Change impact analysis | 🎯 Impact Analyst — HTML report + Cytoscape graph | ✅ shipped (v0.18.0) |
+| 12 | Export to Excel | `export_module_to_xlsx` for non-ELM stakeholders | ✅ shipped (v0.15.0) |
+| 13 | Compliance packet | 📜 Compliance Auditor — NIST 800-53 or IEC 62304 | ✅ shipped (v0.20.0) |
+| 14 | The build-project flow | `/build-new-project` end-to-end | ✅ shipped |
+| 15 | Bonus: ELM docs lookup | `get_elm_docs_links` — never get a dead URL again | ✅ shipped (v0.22.0) |
+| 16 | Self-test + capstone | `elm_mcp_selftest` + a real-world scenario | ✅ shipped (v0.28.0) |
 
 ---
 
@@ -67,4 +67,4 @@ These labs assume:
 
 ## Versioning
 
-Each lab is pinned to the elm-mcp version it was written against. The current series targets **v0.22.1+**. If you're on an older version, run `update_elm_mcp` (or follow Lab 1's update steps) before starting.
+Each lab is pinned to the elm-mcp version it was written against. The current series targets **v0.25.0+** (when the query engine + `resolve_requirement_id` fix landed). If you're on an older version, run `update_elm_mcp` (or follow Lab 1's update steps) before starting.

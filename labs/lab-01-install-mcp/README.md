@@ -172,7 +172,7 @@ cd ~/.elm-mcp && git pull && python3 setup.py
 
 ## Try it yourself
 
-Run `list_capabilities` in Bob. You'll see all 79 tools grouped by domain — the full inventory. We'll work through the most useful ones in the rest of the series.
+Run `list_capabilities` in Bob. You'll see the full tool inventory (80+ tools) grouped by domain. We'll work through the most useful ones in the rest of the series.
 
 ---
 
