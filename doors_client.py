@@ -1338,9 +1338,24 @@ class DOORSNextClient:
             if actual is None:
                 actual = req.get('custom_attributes', {}).get(key, '')
             actual_norm = str(actual).strip().lower()
+
+            # Enum-tolerant comparison. get_attribute_definitions reports
+            # some enum labels with a 'State' prefix (StateDraft,
+            # StateUnderReview) while the artifacts store the bare label
+            # (Draft). Strip a leading 'state' so a filter copied from
+            # either source matches. Fixed in v0.24.2.
+            def _enum_norm(s: str) -> str:
+                s = str(s).strip().lower()
+                return s[5:] if s.startswith('state') and len(s) > 5 else s
+
             if isinstance(want, list):
-                return actual_norm in {str(w).strip().lower() for w in want}
-            return actual_norm == str(want).strip().lower()
+                wants = {str(w).strip().lower() for w in want}
+                if actual_norm in wants:
+                    return True
+                return _enum_norm(actual) in {_enum_norm(w) for w in want}
+            if actual_norm == str(want).strip().lower():
+                return True
+            return _enum_norm(actual) == _enum_norm(want)
 
         return [r for r in reqs
                 if all(match_one(r, k, v) for k, v in filter_dict.items())]
@@ -1366,6 +1381,18 @@ class DOORSNextClient:
                     for custom_attr in obj_type.findall(f'{{{ns_attr}}}customAttribute'):
                         attr_name = custom_attr.get(f'{{{ns_attr}}}name', '')
                         attr_value = custom_attr.get(f'{{{ns_attr}}}value', '')
+                        # For enumeration attributes (Status, Priority,
+                        # Stability, …) the Reportable REST API returns BOTH a
+                        # numeric code (value="4") and the human label
+                        # (literalName="Approved"). Prefer the label: it's what
+                        # the user sees in DNG and what they filter by. Without
+                        # this the value displays as a raw code ("Status: 4")
+                        # and {"Status": "Approved"} filters never match.
+                        # Fixed in v0.24.2.
+                        literal_name = custom_attr.get(
+                            f'{{{ns_attr}}}literalName', '')
+                        if literal_name:
+                            attr_value = literal_name
                         if attr_name and attr_name != 'Identifier':
                             custom_attributes[attr_name] = attr_value
                 if artifact_type:

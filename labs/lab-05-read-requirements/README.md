@@ -58,11 +58,19 @@ Concierge routes to `get_module_requirements(filter={"title_contains": "<word>"}
 Read only System Requirements in <your module>.
 ```
 
-Concierge routes to `get_module_requirements(filter={"artifact_type": "System Requirement"})`. Use the exact type name from `get_artifact_types` (step 6).
+Concierge routes to `get_module_requirements(filter={"artifact_type": "System Requirement"})`. Use the exact type name from `get_artifact_types` (step 7).
 
-> **About filtering by Status / Priority:** these are *enum* attributes, and on many DNG projects the stored value is an internal code (you'll see `Status: 4` in the output rather than `Status: Approved`). That means `{"Status": "Approved"}` can come back empty even when reqs ARE approved — the filter is matching the label against the stored code. Title-substring and artifact-type filters are the dependable ones. If you need status filtering and it returns empty, read the full list (no filter) and eyeball the `Status:` codes, or open the module in the DNG browser. (Improving enum-status filtering is tracked on the repo.)
+### 6. Filter by Status (or any enum attribute)
 
-### 6. Discover what attributes you can filter on
+```
+Read approved requirements in <your module>.
+```
+
+Concierge routes to `get_module_requirements(filter={"Status": "Approved"})`. You see only the Approved reqs.
+
+> **Heads-up (fixed in v0.24.2):** older versions stored enum attributes as internal codes — you'd see `Status: 4` and `{"Status": "Approved"}` returned nothing. As of **v0.24.2** the tool resolves enum labels, so the output shows `Status: Approved` and the filter just works. It's also tolerant of the `State` prefix some projects use (both `Approved` and `StateApproved` match). On **v0.24.1 or older?** Run `update_elm_mcp`, or use title/type filters in the meantime.
+
+### 7. Discover what attributes you can filter on
 
 ```
 What attributes does <your project> support?
@@ -70,7 +78,7 @@ What attributes does <your project> support?
 
 Concierge routes to `get_attribute_definitions`. You see every attribute the project defines — enum-valued ones (Status, Priority, Stability, …) with their allowed labels, and free-form ones (Owner, Created On, …). Use the exact attribute names here when building `filter={...}` dicts.
 
-### 7. Full-text search across the whole project
+### 8. Full-text search across the whole project
 
 ```
 Search for "authentication" in <your project>.
@@ -78,7 +86,7 @@ Search for "authentication" in <your project>.
 
 Concierge routes to `search_requirements`. Returns matching reqs from any module in the project, not just one.
 
-### 8. Look up a specific req by short ID
+### 9. Look up a specific req by short ID
 
 If you saw a req ID like `123` or `REQ-456` in DNG, look it up directly:
 
@@ -100,8 +108,9 @@ You should see all of:
 - ✅ Full requirement list (step 3)
 - ✅ Filtered requirement list — title-substring match (step 4)
 - ✅ Filtered requirement list — by artifact type (step 5)
-- ✅ Attribute definitions for the project (step 6)
-- ✅ Full-text search results across modules (step 7)
+- ✅ Filtered requirement list — by Status (step 6, v0.24.2+)
+- ✅ Attribute definitions for the project (step 7)
+- ✅ Full-text search results across modules (step 8)
 
 ---
 
@@ -116,13 +125,12 @@ You skipped the filter interview. Bob is supposed to ASK about filters before du
 
 ### "A Status / Priority filter returns nothing but I know there are matching reqs"
 
-This is the enum-code limitation from step 5. On many projects, enum attributes are stored as internal codes (`Status: 4`) rather than labels (`Status: Approved`), so `{"Status": "Approved"}` matches nothing. **Workarounds:**
+If you're on **v0.24.2 or newer**, this should just work — enum attributes resolve to their labels (`Approved`, `High`, …) and the filter matches them, including the `State`-prefixed variants (`Approved` and `StateApproved` both work).
 
-- Use a `title_contains` or `artifact_type` filter instead — those always work
-- Read the full list (no filter) and scan the `Status:` codes yourself
-- Open the module in the DNG browser to filter by status visually
+If you're on **v0.24.1 or older**, enum attributes were stored as internal codes (`Status: 4`) so `{"Status": "Approved"}` matched nothing. Fix:
 
-Enum-status filtering is a known rough edge tracked at https://github.com/brettscharm/elm-mcp/issues — title and type filters are the dependable path today.
+- Run `update_elm_mcp` (one tool call) to get the fix, then retry
+- In the meantime, use `title_contains` or `artifact_type` filters — those work on every version
 
 ### "Search returns artifacts I don't recognize"
 
