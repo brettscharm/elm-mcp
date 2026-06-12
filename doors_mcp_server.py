@@ -79,7 +79,7 @@ load_dotenv()
 # decide if a newer GitHub release exists; the `connect_to_elm`
 # response also surfaces it so users always know what version they're
 # running.
-__version__ = "0.27.0"
+__version__ = "0.28.0"
 GITHUB_REPO = "brettscharm/elm-mcp"
 
 app = Server("elm-mcp")
@@ -4927,6 +4927,24 @@ async def list_tools() -> list[Tool]:
                 "health?' / 'are you connected?' / 'what's wrong?'. Returns "
                 "everything the user (or you) need to debug an issue without "
                 "running setup.py --diagnose by hand. Read-only."
+            ),
+            inputSchema={"type": "object", "properties": {}, "required": []}
+        ),
+        Tool(
+            name="elm_mcp_selftest",
+            description=(
+                "Run a full read-path self-test against the live ELM server "
+                "and return a pass/fail scorecard. Use when the user asks "
+                "'run a self test', 'is everything working?', 'test all the "
+                "tools', or after an update to confirm health. Exercises ~19 "
+                "checks: project listing (DNG/EWM/ETM), modules, requirement "
+                "reads + filters (incl. the enum-label and title filters), "
+                "attribute/type discovery, full-text search, "
+                "resolve-by-id, work-item query, the query engine, "
+                "traceability gaps, compliance packet generation, xlsx "
+                "export, docs lookup, and semantic search. Read-only and "
+                "safe — never creates or mutates anything. Auto-picks a "
+                "DNG project that has requirements; takes ~20-40s."
             ),
             inputSchema={"type": "object", "properties": {}, "required": []}
         ),
@@ -10967,6 +10985,25 @@ async def _dispatch_tool(name: str, arguments: Any) -> list[TextContent]:
                                 + "\n".join(status_lines) + summary)]
 
         # ── elm_mcp_health (self-diagnose) ─────────────────────────
+        elif name == "elm_mcp_selftest":
+            try:
+                from selftest import run_selftest, format_scorecard
+            except Exception as e:
+                return [TextContent(type="text",
+                                     text=f"Failed to load selftest: {e}")]
+            if not client:
+                return [TextContent(type="text", text=(
+                    "Not connected to ELM. Call `connect_to_elm` first, "
+                    "then run the self-test."
+                ))]
+            try:
+                result = run_selftest(client)
+            except Exception as e:
+                return [TextContent(type="text",
+                                     text=f"Self-test crashed: {e}")]
+            return [TextContent(type="text",
+                                 text=format_scorecard(result, __version__))]
+
         elif name == "elm_mcp_health":
             import datetime as _dt
             now = _dt.datetime.utcnow().isoformat() + "Z"

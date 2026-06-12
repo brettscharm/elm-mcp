@@ -122,6 +122,10 @@ customModes:
       ├──────────────────────────────────────────┼──────────────────────────┤
       │ "Health" / "are you connected" / "diag"  │ elm_mcp_health           │
       ├──────────────────────────────────────────┼──────────────────────────┤
+      │ "Run a self test" / "is everything       │ elm_mcp_selftest         │
+      │ working" / "test all the tools" / "did    │ (live read-path scorecard│
+      │ the update break anything"                │  — ~20-40s, read-only)   │
+      ├──────────────────────────────────────────┼──────────────────────────┤
       │ "ELM docs" / "upgrade guide" / "install  │ get_elm_docs_links       │
       │ docs" / "where are the docs" / "RQA" /   │                          │
       │ "AI Hub" / "DXL reference" / "OSLC spec" │                          │
