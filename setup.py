@@ -985,6 +985,14 @@ def main() -> int:
              "Jira's REST API directly. No Atlassian MCP / Node / OAuth.",
     )
     parser.add_argument(
+        "--with-semantic", action="store_true",
+        help="Also install the optional semantic-search dependency "
+             "(fastembed — lightweight, ONNX, air-gap safe). Powers "
+             "find_similar_requirements. Adds ~50 MB; the embedding model "
+             "downloads once on first use. Without it, semantic search "
+             "returns an install hint and everything else works.",
+    )
+    parser.add_argument(
         "--no-modes", action="store_true",
         help="Skip auto-installing the 5 elm-mcp custom Bob modes "
              "(Concierge, Plan, Push, Impact Analyst, Compliance Auditor). "
@@ -1073,6 +1081,20 @@ def main() -> int:
         print()
         print(f"{BOLD}Jira credentials (for /import-jira){RESET}")
         prompt_for_jira_credentials()
+
+    # ── Optional: semantic-search dependency ─────────────────────
+    if args.with_semantic:
+        print()
+        print(f"{BOLD}Installing semantic search (fastembed){RESET}")
+        sem_req = HERE / "requirements-semantic.txt"
+        try:
+            subprocess.run([py_exe, "-m", "pip", "install", "-r",
+                            str(sem_req)], check=True)
+            ok("fastembed installed — find_similar_requirements is ready.")
+            info("The embedding model (~130 MB) downloads on first use.")
+        except Exception as e:
+            warn(f"Couldn't install fastembed: {e}")
+            info("Install it manually: pip install -r requirements-semantic.txt")
 
     print(f"\n{GREEN}{BOLD}Setup complete.{RESET}\n")
 

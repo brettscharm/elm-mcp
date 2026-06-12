@@ -1,0 +1,15 @@
+# Optional dependency for semantic search (find_similar_requirements).
+#
+# fastembed is ONNX-based — lightweight (~50 MB install, NOT the 2 GB
+# torch stack) and runs fully LOCAL, so requirement text never leaves
+# your machine (air-gap safe). The embedding model (~130 MB) downloads
+# once on first use and is cached for offline use after.
+#
+# Install with:
+#   pip install -r requirements-semantic.txt
+# or:
+#   python3 ~/.elm-mcp/setup.py --with-semantic
+#
+# Without this, find_similar_requirements returns a friendly install
+# hint and the rest of the MCP works normally.
+fastembed>=0.3.0

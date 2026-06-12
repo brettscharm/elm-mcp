@@ -123,8 +123,29 @@ Reportable REST returns `<customAttribute name="Status" value="4" literalName="A
 | `resolve_requirement_id` fixed (correct capability + prefix) | ✅ v0.25.0 |
 | EWM + ETM domain backends (`domain=ewm` / `domain=etm`) | ✅ v0.26.0 |
 | `query_work_items` fixed (Deliverable vs ChangeRequest capability) | ✅ v0.26.0 |
+| Semantic search — `find_similar_requirements` (local, air-gap) | ✅ v0.27.0 |
 | Refactor remaining read tools into thin engine facades | ⏳ future |
-| Semantic search (embeddings) as a backend | ⏳ future |
+
+## Semantic search (v0.27.0)
+
+`find_similar_requirements` finds reqs by **meaning**, not keywords —
+the complement to the literal full-text `search_requirements`. Use it to
+dedup before creating ("is there already a req about session timeout?")
+or to surface related reqs keyword search misses.
+
+- **Local + air-gap safe** — `fastembed` (ONNX, ~50 MB, NOT the 2 GB
+  torch stack). Requirement text never leaves the machine. The model
+  (~130 MB) downloads once, then runs offline.
+- **Optional dependency** — not in core `requirements.txt`. Install via
+  `pip install -r requirements-semantic.txt` or `setup.py --with-semantic`.
+  Without it, the tool returns a friendly install hint and everything
+  else works (the dead-simple core install stays light).
+- **Embedding cache** — `~/.elm-mcp/embeddings/` keyed by text hash, so
+  re-querying a module doesn't re-embed unchanged reqs.
+
+Proven semantic understanding (live): a search for *"accessibility for
+blind users"* ranks **Screen Reader Compatibility** high with zero
+shared keywords.
 
 ## Domains (v0.26.0)
 

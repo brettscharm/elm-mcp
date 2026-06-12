@@ -79,7 +79,7 @@ load_dotenv()
 # decide if a newer GitHub release exists; the `connect_to_elm`
 # response also surfaces it so users always know what version they're
 # running.
-__version__ = "0.26.0"
+__version__ = "0.27.0"
 GITHUB_REPO = "brettscharm/elm-mcp"
 
 app = Server("elm-mcp")
@@ -5312,6 +5312,70 @@ async def list_tools() -> list[Tool]:
             }
         ),
         Tool(
+            name="find_similar_requirements",
+            description=(
+                "Semantic search — find requirements that MEAN the same "
+                "thing as a reference, even with no shared keywords. Use "
+                "for: 'is there already a req about X?' (dedup before "
+                "creating), 'find reqs like REQ-123', 'what reqs relate to "
+                "session timeout?'. Runs fully LOCAL (air-gap safe — req "
+                "text never leaves the machine) via optional lightweight "
+                "embeddings. Understands meaning: a search for "
+                "'accessibility for blind users' surfaces 'Screen Reader "
+                "Compatibility' with zero keyword overlap. Returns reqs "
+                "ranked by similarity (0..1 score). If the optional "
+                "`fastembed` package isn't installed it returns an install "
+                "hint. Read-only."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "project_identifier": {
+                        "type": "string",
+                        "description": "DNG project number or name (required)."
+                    },
+                    "reference_text": {
+                        "type": "string",
+                        "description": (
+                            "The concept to match against — a phrase or a "
+                            "draft requirement ('user session must time out "
+                            "after inactivity'). Provide this OR "
+                            "requirement_id."
+                        )
+                    },
+                    "requirement_id": {
+                        "type": "string",
+                        "description": (
+                            "Alternatively, a short ID — the engine uses "
+                            "that requirement's title as the reference to "
+                            "find similar reqs. Provide this OR "
+                            "reference_text."
+                        )
+                    },
+                    "module_identifier": {
+                        "type": "string",
+                        "description": (
+                            "Optional — limit the search to one module. "
+                            "Omit to search every module in the project."
+                        )
+                    },
+                    "top_k": {
+                        "type": "integer",
+                        "description": "How many matches to return (default 10)."
+                    },
+                    "min_score": {
+                        "type": "number",
+                        "description": (
+                            "Minimum cosine similarity 0..1 to include "
+                            "(default 0.3). Raise to 0.6+ for only close "
+                            "matches."
+                        )
+                    }
+                },
+                "required": ["project_identifier"]
+            }
+        ),
+        Tool(
             name="query_elm",
             description=(
                 "Unified natural-language query across DNG requirements, "
@@ -7708,6 +7772,7 @@ async def _dispatch_tool(name: str, arguments: Any) -> list[TextContent]:
                 "Compliance": ["generate_compliance_packet"],
                 "Docs lookup": ["get_elm_docs_links"],
                 "Unified query": ["query_elm"],
+                "Semantic search": ["find_similar_requirements"],
             }
 
             tool_descs = {
@@ -10336,6 +10401,105 @@ async def _dispatch_tool(name: str, arguments: Any) -> list[TextContent]:
                 f"'NIST 800-53 IA-2' or 'IEC 62304 §5.3.3' to artifact "
                 f"titles or attributes to improve detection._"
             ))]
+
+        elif name == "find_similar_requirements":
+            try:
+                import semantic
+                from query_engine import QueryIntent, execute
+            except Exception as e:
+                return [TextContent(type="text",
+                                     text=f"Failed to load semantic/query engine: {e}")]
+            if not client:
+                return [TextContent(type="text", text=(
+                    "Not connected to ELM. Call `connect_to_elm` first."
+                ))]
+            if not semantic.is_available():
+                return [TextContent(type="text",
+                                     text="# Semantic search unavailable\n\n"
+                                     + semantic.install_hint())]
+
+            proj_id = (arguments.get("project_identifier") or "").strip()
+            if not proj_id:
+                return [TextContent(type="text",
+                                     text="Error: project_identifier is required.")]
+            ref_text = (arguments.get("reference_text") or "").strip()
+            ref_id = (arguments.get("requirement_id") or "").strip()
+            module = (arguments.get("module_identifier") or "").strip() or None
+            top_k = int(arguments.get("top_k") or 10)
+            min_score = float(arguments.get("min_score") if arguments.get("min_score") is not None else 0.3)
+
+            # Resolve the reference text (from id if given)
+            if not ref_text and ref_id:
+                try:
+                    if not _projects_cache:
+                        _projects_cache = client.list_projects()
+                    proj = _find_by_identifier(_projects_cache, proj_id)
+                    if proj:
+                        r = client.resolve_requirement_id(proj['url'], ref_id)
+                        if r:
+                            ref_text = r.get('title', '')
+                except Exception:
+                    pass
+            if not ref_text:
+                return [TextContent(type="text", text=(
+                    "Error: provide reference_text, or a requirement_id that "
+                    "resolves to a requirement."
+                ))]
+
+            # Fetch candidate reqs in scope via the query engine
+            try:
+                out = execute(client, QueryIntent(project=proj_id,
+                                                    module=module, limit=1000))
+            except Exception as e:
+                return [TextContent(type="text",
+                                     text=f"Failed to fetch candidates: {e}")]
+            candidates = out.get("results", [])
+            if not candidates:
+                return [TextContent(type="text", text=(
+                    "No requirements found in scope to compare against."
+                ))]
+
+            ranked = semantic.rank_by_similarity(
+                ref_text, candidates, text_key="title",
+                top_k=top_k, min_score=min_score)
+            if ranked is None:
+                return [TextContent(type="text",
+                                     text="# Semantic search unavailable\n\n"
+                                     + semantic.install_hint())]
+            if not ranked:
+                return [TextContent(type="text", text=(
+                    f"No requirements scored above {min_score} similarity to "
+                    f"\"{ref_text}\". Lower min_score to see weaker matches."
+                ))]
+
+            lines = [
+                f"# Requirements similar to: \"{ref_text}\"",
+                f"_{len(ranked)} match(es) above {min_score} similarity · "
+                f"local embeddings (air-gap safe)_\n",
+            ]
+            for i, r in enumerate(ranked, 1):
+                score = r.get("_score", 0)
+                bar = "█" * int(score * 10) + "░" * (10 - int(score * 10))
+                title = r.get("title") or "(untitled)"
+                rid = r.get("id", "")
+                mod = r.get("_module", "")
+                url = r.get("url", "")
+                meta = []
+                if rid:
+                    meta.append(f"ID {rid}")
+                if mod and not module:
+                    meta.append(f"in {mod}")
+                metastr = (" · " + " · ".join(meta)) if meta else ""
+                lines.append(f"{i}. `{bar}` **{score:.2f}**  {title}{metastr}")
+                if url:
+                    lines.append(f"   {url}")
+
+            lines.append(
+                "\n_Higher score = closer in meaning. Use this to dedup "
+                "before creating a new requirement, or to find related reqs "
+                "that keyword search would miss._"
+            )
+            return [TextContent(type="text", text="\n".join(lines))]
 
         elif name == "query_elm":
             try:
