@@ -72,6 +72,20 @@ def _ensure_dependencies() -> None:
     (matplotlib / PyMuPDF); progress is printed to stderr so the host sees
     it's working, and the re-exec'd start is instant.
     """
+    # Hard floor: the MCP SDK has no build for Python < 3.10. If the host
+    # launched us with an older interpreter, auto-installing can't fix it
+    # — say so clearly instead of looping on a doomed pip install.
+    if sys.version_info < (3, 10):
+        sys.stderr.write(
+            f"[elm-mcp] Python 3.10+ is required — this interpreter is "
+            f"{sys.version.split()[0]} ({sys.executable}).\n"
+            f"[elm-mcp] The MCP SDK has no build for Python < 3.10. Point "
+            f"your AI host at a 3.10+ Python (e.g. brew install python@3.12) "
+            f"and re-run the installer.\n"
+        )
+        sys.stderr.flush()
+        sys.exit(1)
+
     import importlib.util
     # Import-names of the deps that must be present for the server to run.
     critical = ["mcp", "dotenv", "requests", "fitz", "matplotlib",
@@ -162,7 +176,7 @@ load_dotenv()
 # decide if a newer GitHub release exists; the `connect_to_elm`
 # response also surfaces it so users always know what version they're
 # running.
-__version__ = "0.31.1"
+__version__ = "0.31.2"
 GITHUB_REPO = "brettscharm/elm-mcp"
 
 app = Server("elm-mcp")

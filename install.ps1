@@ -41,7 +41,14 @@ Write-OkLine "git: $((git --version) 2>&1)"
 # Python - try the 'py' launcher first (most reliable on Windows), then
 # python / python3. Each candidate is an exe + an explicit args array, so
 # there's no fragile string-splitting.
+# The MCP SDK (`mcp`) has NO build for Python < 3.10, so we require 3.10+
+# and prefer an explicit newer interpreter (the `py` launcher can target
+# a specific version) before falling back to a bare python/python3.
 $PyCandidates = @(
+    [pscustomobject]@{ Exe = "py";      PreArgs = @("-3.13") },
+    [pscustomobject]@{ Exe = "py";      PreArgs = @("-3.12") },
+    [pscustomobject]@{ Exe = "py";      PreArgs = @("-3.11") },
+    [pscustomobject]@{ Exe = "py";      PreArgs = @("-3.10") },
     [pscustomobject]@{ Exe = "py";      PreArgs = @("-3") },
     [pscustomobject]@{ Exe = "python";  PreArgs = @() },
     [pscustomobject]@{ Exe = "python3"; PreArgs = @() }
@@ -50,13 +57,13 @@ $Py = $null
 foreach ($c in $PyCandidates) {
     if (Get-Command $c.Exe -ErrorAction SilentlyContinue) {
         try {
-            $probe = & $c.Exe @($c.PreArgs) -c "import sys; print(1 if sys.version_info >= (3,9) else 0)" 2>$null
+            $probe = & $c.Exe @($c.PreArgs) -c "import sys; print(1 if sys.version_info >= (3,10) else 0)" 2>$null
             if ("$probe".Trim() -eq "1") { $Py = $c; break }
         } catch { }
     }
 }
 if (-not $Py) {
-    Write-FailLine "Python 3.9+ is required. Install from https://www.python.org/downloads/windows/ (check 'Add Python to PATH'), then re-run."
+    Write-FailLine "Python 3.10+ is required (the MCP SDK has no build for older). Install from https://www.python.org/downloads/windows/ (check 'Add Python to PATH'), then re-run."
 }
 $PyVer = (& $Py.Exe @($Py.PreArgs) --version 2>&1)
 $PyDisplay = (@($Py.Exe) + $Py.PreArgs) -join " "

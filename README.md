@@ -12,7 +12,7 @@
 
 ## Set up Bob in 3 steps (30 seconds)
 
-You need: macOS, Linux, **or Windows**; Python 3.9+; and an ELM account.
+You need: macOS, Linux, **or Windows**; Python 3.10+ (the MCP SDK needs it — note macOS often ships an old 3.9); and an ELM account.
 
 > ### 🛑 Prerequisite: DNG configuration management (CM) must be enabled on your projects
 >

@@ -1095,6 +1095,21 @@ def main() -> int:
         info("If your IDE doesn't use this same venv, the MCP server will fail to start.")
         info("If unsure, re-run with the OS-default python: /usr/bin/python3 setup.py")
 
+    # The MCP SDK has no build for Python < 3.10 — fail fast with a clear
+    # message instead of a cryptic "No matching distribution for mcp" at
+    # the pip step. (install.sh/.ps1 already prefer 3.10+, but someone may
+    # run `python3.9 setup.py` directly.)
+    if sys.version_info < (3, 10):
+        fail(f"Python 3.10+ is required — this interpreter is "
+             f"{sys.version.split()[0]}.")
+        info(f"The MCP SDK (`mcp`) has no build for Python < 3.10, so the "
+             f"install can't succeed on this Python.")
+        info("Install a newer Python and run setup with it, e.g.:")
+        info("  brew install python@3.12")
+        info(f'  "$(brew --prefix)/bin/python3.12" {HERE / "setup.py"}')
+        info("  (or download from https://www.python.org/downloads/macos/)")
+        return 1
+
     py_exe = sys.executable
     install_bob_modes = (not args.no_modes) and host_present_bob(Path.home())
     total = 6 if install_bob_modes else 5

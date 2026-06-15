@@ -39,14 +39,27 @@ command -v git >/dev/null 2>&1 || fail "git is not installed."
 ok "git: $(git --version)"
 
 PY=""
-for candidate in python3 python; do
+# The MCP SDK (`mcp`) has NO build for Python < 3.10 — installing on 3.9
+# fails with "No matching distribution found for mcp". So we require
+# 3.10+, and we PREFER an explicit newer interpreter over a bare
+# `python3` (which on macOS is often Apple's 3.9 Command Line Tools
+# build even when a newer Python is installed).
+for candidate in python3.13 python3.12 python3.11 python3.10 python3 python; do
   if command -v "$candidate" >/dev/null 2>&1; then
-    if "$candidate" -c "import sys; sys.exit(0 if sys.version_info >= (3,9) else 1)" 2>/dev/null; then
+    if "$candidate" -c "import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)" 2>/dev/null; then
       PY="$candidate"; break
     fi
   fi
 done
-[ -n "$PY" ] || fail "Python 3.9+ is required. Install from https://www.python.org/downloads/ and re-run."
+if [ -z "$PY" ]; then
+  cur="(none found)"
+  command -v python3 >/dev/null 2>&1 && cur="$(python3 --version 2>&1)"
+  printf "  ${RED}FAIL${RESET}  Python 3.10+ is required (the MCP SDK has no build for older).\n"
+  printf "        Your python3 is: %s\n" "$cur"
+  printf "        Install a newer Python, then re-run this command:\n"
+  printf "          ${BOLD}brew install python@3.12${RESET}   (or https://www.python.org/downloads/macos/)\n"
+  exit 1
+fi
 ok "$PY: $($PY --version 2>&1)"
 
 # ── Clone or update ──────────────────────────────────────────

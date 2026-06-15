@@ -9,7 +9,7 @@
 ## What you need first
 
 - **IBM Bob** (or any MCP host: Claude Code, Cursor, VS Code with the Claude extension, Windsurf). This series is written for Bob.
-- **Python 3.9+** — `python3 --version` (macOS/Linux) or `py --version` (Windows). 3.11+ recommended.
+- **Python 3.10+** — `python3 --version` (macOS/Linux) or `py --version` (Windows). 3.11+ recommended. (The MCP SDK has no build for 3.9 — and macOS often ships an old 3.9, so install a newer one if `python3 --version` shows 3.9.x.)
 - **Git** — `git --version`. On Windows, get it from [git-scm.com](https://git-scm.com/download/win).
 - **ELM credentials** — your server URL (e.g. `https://yourco.elm.ibmcloud.com`), username, and password. Same login that works in the DOORS Next browser.
 
