@@ -88,7 +88,9 @@ Bob should respond with your DNG projects. **If you see your projects, you're do
 
 **Bob doesn't see the server after restart.** Some Bob deployments don't auto-load new MCP config. The installer printed a JSON block with your exact paths — open Bob → Settings → MCP Servers → Add Server and paste the Name / Command / Args from it, then restart again.
 
-**"Missing dependencies" / Bob can't figure out what to install.** You don't have to — the server **self-heals**. The first time it starts with a Python that's missing dependencies, it installs them into that exact interpreter and restarts itself (you'll see `[elm-mcp] Auto-installing…` in Bob's MCP output panel; it takes ~20–30s the first time, then it's instant). If you ever see it give up after that, it prints the one command to run by hand — copy it as-is (it already points at the right Python).
+**The installer failed on "externally-managed-environment" / pip install.** This is PEP 668 — on a fresh Mac, Homebrew/python.org Python 3.12+ refuses a plain `pip install`. As of **v0.31.1** the installer handles this automatically: it falls back through `--user`, `--break-system-packages`, and finally creates a dedicated virtualenv (`~/.elm-mcp/.venv`) and points Bob at it — no system packages touched. If you hit this on an older version, run `update_elm_mcp` (or re-run the installer) to get the fix.
+
+**"Missing dependencies" / Bob can't figure out what to install.** You don't have to — the server **self-heals**. The first time it starts with a Python that's missing dependencies, it installs them into that exact interpreter and restarts itself (you'll see `[elm-mcp] Auto-installing…` in Bob's MCP output panel; ~20–30s the first time, then instant). If it gives up after that, it prints the one command to run by hand — copy it as-is (it already points at the right Python).
 
 **The one-liner didn't prompt for my password / execution blocked.** Use the manual path (every OS):
 ```bash

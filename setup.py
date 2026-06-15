@@ -130,28 +130,91 @@ def interpreter_can_import(py_exe: str, modules: tuple[str, ...]) -> tuple[bool,
 
 # ── Step 1: dependencies ─────────────────────────────────────
 
-def install_dependencies(py_exe: str) -> bool:
+def install_dependencies(py_exe: str) -> tuple[bool, str]:
+    """Install the core deps into py_exe, with fallbacks for the common
+    fresh-Mac failure modes.
+
+    Returns (success, python_to_use). `python_to_use` is normally the
+    interpreter you passed in — UNLESS we had to fall back to a dedicated
+    virtualenv, in which case it's the venv's python and the caller
+    should configure the host (and smoke-test) with THAT.
+
+    Why the cascade: on a fresh macOS with Homebrew / python.org Python
+    3.12+, a plain `pip install` is BLOCKED by PEP 668 with
+    "error: externally-managed-environment" — which used to abort the
+    whole installer. We now try, in order:
+      1. plain install
+      2. --user                       (per-user site, dodges some blocks)
+      3. --break-system-packages      (the PEP 668 escape hatch)
+      4. a dedicated venv at <dir>/.venv  (bulletproof: isolated, and it
+         bootstraps its OWN pip so it also rescues the no-system-pip case)
+    The venv is the last resort and the most robust — it touches no
+    system packages and can't be wiped by a Homebrew upgrade.
+    """
     if not REQUIREMENTS.exists():
         fail(f"Missing {REQUIREMENTS.name}")
-        return False
-    info(f"Running: {py_exe} -m pip install -r {REQUIREMENTS.name}")
-    # No -q here: if pip fails we want the user to see exactly why.
-    # Capture so we can replay both stdout and stderr together on failure.
-    result = subprocess.run(
-        [py_exe, "-m", "pip", "install", "-r", str(REQUIREMENTS)],
-        cwd=HERE,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        fail("pip install failed.")
+        return False, py_exe
+
+    def _run(cmd):
+        return subprocess.run(cmd, cwd=HERE, capture_output=True, text=True)
+
+    def _dump(result):
+        if result is None:
+            return
         if result.stdout:
             print(result.stdout)
         if result.stderr:
             print(result.stderr, file=sys.stderr)
-        return False
-    ok("Dependencies installed")
-    return True
+
+    base = [py_exe, "-m", "pip", "install", "-r", str(REQUIREMENTS)]
+    attempts = [
+        (base, "pip install"),
+        (base + ["--user"], "pip install --user"),
+        (base + ["--break-system-packages"],
+         "pip install --break-system-packages"),
+    ]
+    last = None
+    for cmd, label in attempts:
+        info(f"Trying: {label}")
+        last = _run(cmd)
+        if last.returncode == 0:
+            ok(f"Dependencies installed ({label})")
+            return True, py_exe
+        # Only keep cascading on the externally-managed / no-pip class of
+        # error; a genuine build failure will fail the same way each time,
+        # so surface it rather than retrying pointlessly.
+
+    # In-place installs all failed — fall back to a dedicated venv.
+    warn("System Python rejected the install (this is normal on macOS with "
+         "Homebrew/python.org 3.12+ — PEP 668 'externally-managed'). "
+         "Creating a dedicated virtual environment instead...")
+    venv_dir = HERE / ".venv"
+    try:
+        _run([py_exe, "-m", "venv", str(venv_dir)])
+    except Exception:
+        pass
+    venv_py = str(
+        venv_dir / ("Scripts" if os.name == "nt" else "bin")
+        / ("python.exe" if os.name == "nt" else "python")
+    )
+    if not os.path.exists(venv_py):
+        fail("Could not create a virtual environment.")
+        _dump(last)
+        info(f"Manual fix: {py_exe} -m pip install --break-system-packages "
+             f"-r {REQUIREMENTS}")
+        return False, py_exe
+
+    venv_install = _run([venv_py, "-m", "pip", "install", "-r",
+                         str(REQUIREMENTS)])
+    if venv_install.returncode == 0:
+        ok(f"Dependencies installed into a dedicated venv: {venv_dir}")
+        info("The AI host will be pointed at this venv's Python — no system "
+             "packages were touched.")
+        return True, venv_py
+
+    fail("pip install failed even in a fresh virtualenv.")
+    _dump(venv_install)
+    return False, py_exe
 
 
 # ── Step 2: IDE / MCP host detection + config ────────────────
@@ -1037,15 +1100,20 @@ def main() -> int:
     total = 6 if install_bob_modes else 5
 
     step(1, total, "Install Python dependencies")
-    if not install_dependencies(py_exe):
+    dep_ok, py_exe = install_dependencies(py_exe)
+    if not dep_ok:
         return 1
+    # install_dependencies may have switched py_exe to a dedicated venv's
+    # python (PEP 668 fallback). Everything downstream — import check,
+    # host config, smoke test — now uses that interpreter, so Bob is
+    # pointed at the Python that actually has the deps.
 
     step(2, total, "Verify the chosen Python can import everything")
     ok_imports, missing = interpreter_can_import(py_exe, REQUIRED_IMPORTS)
     if not ok_imports:
-        fail(f"Even after pip install, {py_exe} cannot import: {', '.join(missing)}")
-        info("This usually means pip installed into a different Python than the one "
-             "you ran setup with. Check `which python3` vs the path printed above.")
+        fail(f"Even after install, {py_exe} cannot import: {', '.join(missing)}")
+        info("Try a clean retry: delete the partial install and re-run — "
+             f"`rm -rf {HERE / '.venv'} && python3 setup.py`")
         return 1
     ok(f"All required modules importable in {py_exe}")
 
