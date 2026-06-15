@@ -47,6 +47,8 @@ Either command:
 - **Installs the 5 custom modes** (🧭 Concierge, 📝 Plan, 📤 Push, 🎯 Impact Analyst, 📜 Compliance Auditor) — merged into Bob's modes, your other modes preserved
 - Verifies the whole thing works end-to-end
 
+> **Dependencies just work.** Even if Bob launches the server with a different Python than the installer used (the #1 cause of "missing dependency" failures), the server **self-heals** on first start — it installs its own dependencies into whatever interpreter Bob uses, then restarts. No guessing, no manual `pip install`.
+
 > **No internet one-liner / corporate-locked machine?** Works on every OS:
 > `git clone https://github.com/brettscharm/elm-mcp.git ~/.elm-mcp`, then
 > `cd ~/.elm-mcp` and `python3 setup.py` (use `py setup.py` on Windows).

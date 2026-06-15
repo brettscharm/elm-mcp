@@ -50,6 +50,89 @@ import logging
 import asyncio
 from typing import Any, Optional, List, Dict
 
+
+def _ensure_dependencies() -> None:
+    """Self-heal missing Python dependencies, BEFORE the heavy imports.
+
+    The #1 fresh-install failure for any MCP server is a Python mismatch:
+    the deps got pip-installed into one interpreter, but the AI host
+    (Bob / Claude Code / Cursor) launches the server with a DIFFERENT
+    interpreter that can't import them — so the server crashes on startup
+    and the AI is left guessing what to install.
+
+    This removes the guesswork entirely: if a critical dependency is
+    missing, we pip-install requirements.txt into `sys.executable` — which
+    is, by definition, the exact interpreter the host just used to launch
+    us — then re-exec so the fresh packages are importable. A one-shot
+    env guard prevents an install loop. Uses only the standard library so
+    it always runs.
+
+    Optional extras (fastembed for semantic search) are NOT auto-installed
+    — only the core requirements. The first heal can take ~20-30s
+    (matplotlib / PyMuPDF); progress is printed to stderr so the host sees
+    it's working, and the re-exec'd start is instant.
+    """
+    import importlib.util
+    # Import-names of the deps that must be present for the server to run.
+    critical = ["mcp", "dotenv", "requests", "fitz", "matplotlib",
+                "yaml", "markdown"]
+    missing = [m for m in critical if importlib.util.find_spec(m) is None]
+    if not missing:
+        return
+
+    if os.environ.get("ELM_MCP_DEPS_HEALED") == "1":
+        # We already installed once and they're STILL missing — don't
+        # loop. Most likely pip installed into a user site-packages that
+        # isn't on this interpreter's path, or the install was blocked.
+        sys.stderr.write(
+            f"[elm-mcp] Dependencies still missing after auto-install: "
+            f"{', '.join(missing)}.\n"
+            f"[elm-mcp] Install them by hand with the SAME Python the host "
+            f"uses:\n"
+            f"    {sys.executable} -m pip install -r "
+            f"{os.path.join(os.path.dirname(os.path.abspath(__file__)), 'requirements.txt')}\n"
+        )
+        sys.stderr.flush()
+        sys.exit(1)
+
+    import subprocess
+    here = os.path.dirname(os.path.abspath(__file__))
+    req = os.path.join(here, "requirements.txt")
+    sys.stderr.write(
+        f"[elm-mcp] Missing dependencies: {', '.join(missing)}.\n"
+        f"[elm-mcp] Auto-installing into {sys.executable} "
+        f"(one-time, ~20-30s)...\n"
+    )
+    sys.stderr.flush()
+
+    base_cmd = [sys.executable, "-m", "pip", "install", "-r", req,
+                "--disable-pip-version-check", "-q"]
+    ok = False
+    for cmd in (base_cmd, base_cmd + ["--user"]):  # retry --user if blocked
+        try:
+            subprocess.run(cmd, check=True, timeout=300)
+            ok = True
+            break
+        except Exception:
+            continue
+    if not ok:
+        sys.stderr.write(
+            f"[elm-mcp] Auto-install failed (offline, or pip blocked).\n"
+            f"[elm-mcp] Run manually: {sys.executable} -m pip install -r {req}\n"
+        )
+        sys.stderr.flush()
+        sys.exit(1)
+
+    sys.stderr.write("[elm-mcp] Dependencies installed — restarting server.\n")
+    sys.stderr.flush()
+    os.environ["ELM_MCP_DEPS_HEALED"] = "1"
+    os.execvp(sys.executable,
+              [sys.executable, os.path.abspath(__file__)] + sys.argv[1:])
+
+
+# Run the dependency self-heal before any third-party import below.
+_ensure_dependencies()
+
 # MCP stdio servers must log to stderr, never stdout
 logging.basicConfig(
     stream=sys.stderr,
@@ -79,7 +162,7 @@ load_dotenv()
 # decide if a newer GitHub release exists; the `connect_to_elm`
 # response also surfaces it so users always know what version they're
 # running.
-__version__ = "0.30.1"
+__version__ = "0.31.0"
 GITHUB_REPO = "brettscharm/elm-mcp"
 
 app = Server("elm-mcp")
