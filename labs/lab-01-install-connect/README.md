@@ -21,7 +21,31 @@ If you don't have an ELM environment, ask your admin for a sandbox project, or u
 
 ## Step 1 — install
 
-### macOS / Linux — one command
+### Easiest, any OS — `uv` + one paste (no Python to install)
+
+If you've hit Python/install trouble, use this. `uv` downloads its own Python 3.10+ and the dependencies — you don't install or manage Python at all.
+
+1. **Install `uv`** once: Windows `winget install --id=astral-sh.uv -e` · macOS `brew install uv` (or `pip install uv` if you already have any Python).
+2. In Bob: **settings/gear icon → MCP tab → Edit Global MCP**, and add this inside `mcpServers` (fill in your ELM details):
+   ```json
+   {
+     "mcpServers": {
+       "elm-mcp": {
+         "command": "uvx",
+         "args": ["--from", "git+https://github.com/brettscharm/elm-mcp", "elm-mcp"],
+         "env": {
+           "ELM_URL": "https://yourco.elm.ibmcloud.com",
+           "ELM_USERNAME": "your-username",
+           "ELM_PASSWORD": "your-password"
+         }
+       }
+     }
+   }
+   ```
+
+First launch takes ~30–60s while `uv` fetches Python + deps. Trade-off: this path doesn't install the 5 custom modes (the installer below does) — but all the tools work. Skip to Step 2 if you used this.
+
+### Installer — one command (macOS / Linux)
 
 Open Terminal, paste, Enter:
 

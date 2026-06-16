@@ -176,7 +176,7 @@ load_dotenv()
 # decide if a newer GitHub release exists; the `connect_to_elm`
 # response also surfaces it so users always know what version they're
 # running.
-__version__ = "0.31.4"
+__version__ = "0.31.5"
 GITHUB_REPO = "brettscharm/elm-mcp"
 
 app = Server("elm-mcp")
@@ -11536,6 +11536,18 @@ async def main():
     logger.info(f"IBM ELM MCP Server v{__version__} starting (62 tools, 10 prompts, 3 resource templates)")
     async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
         await app.run(read_stream, write_stream, app.create_initialization_options())
+
+
+def cli() -> None:
+    """Synchronous console-script entry point.
+
+    This is what `pyproject.toml`'s `[project.scripts]` points at, so the
+    server can be launched as the command `elm-mcp` after a `pip install`
+    or — the easy path for Bob — `uvx --from git+<repo> elm-mcp`. uv/pip
+    install the deps from this package's metadata and provision a 3.10+
+    Python automatically, so there's no clone, no setup.py, and no manual
+    pip. `main()` is async, so we wrap it for the (sync) entry point."""
+    asyncio.run(main())
 
 
 if __name__ == "__main__":

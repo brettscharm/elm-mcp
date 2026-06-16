@@ -1,0 +1,99 @@
+###############################################################################
+# Packaging metadata for elm-mcp.
+#
+# Why this file exists: it makes the server pip-installable, which unlocks the
+# EASIEST possible setup for IBM Bob (and any MCP host) — a single JSON block,
+# no clone, no setup.py, no manual pip, and no Python-version juggling:
+#
+#   "command": "uvx",
+#   "args": ["--from", "git+https://github.com/brettscharm/elm-mcp", "elm-mcp"]
+#
+# `uvx` (from Astral's `uv`) reads the metadata below, provisions a Python that
+# satisfies `requires-python` (downloading one if the machine has none / only an
+# old 3.9), installs the dependencies into an isolated environment, and runs the
+# `elm-mcp` console script. The user only has to install `uv` once (a single
+# standalone binary) and paste the JSON.
+#
+# Layout note: this is a FLAT project (top-level modules that import each other
+# as `import doors_client`, `from query_engine import ...`, etc.), plus a
+# `compliance/` data dir the server reads at runtime via Path(__file__).parent.
+# So we use hatchling's force-include to ship the exact files, preserving their
+# top-level paths in the wheel (they install to the env root, where the existing
+# imports already expect them).
+###############################################################################
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "elm-mcp"
+dynamic = ["version"]                       # read from doors_mcp_server.__version__
+description = "MCP server for IBM Engineering Lifecycle Management (ELM) — DOORS Next, EWM, ETM, GCM, and SCM — for AI assistants like IBM Bob, Claude, and Cursor."
+readme = "README.md"
+requires-python = ">=3.10"                  # the MCP SDK has no build for < 3.10
+license = { text = "MIT" }
+authors = [{ name = "Brett Scharmett" }]
+keywords = ["ibm", "elm", "doors-next", "dng", "ewm", "etm", "oslc", "requirements", "mcp"]
+
+# Mirrors requirements.txt. Keep the two in sync (requirements.txt stays for the
+# clone + setup.py path and the server's self-heal fallback message).
+dependencies = [
+  "requests>=2.31.0",
+  "python-dotenv>=1.0.0",
+  "mcp>=1.0.0",
+  "PyMuPDF>=1.24.0",
+  "matplotlib>=3.8.0",
+  "markdown>=3.5",
+  "openpyxl>=3.1.0",
+  "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+# Local semantic search (find_similar_requirements). ONNX-based, ~50 MB, fully
+# local. Opt in with: uvx --from "git+https://github.com/brettscharm/elm-mcp[semantic]" elm-mcp
+semantic = ["fastembed>=0.3.0"]
+
+[project.scripts]
+elm-mcp = "doors_mcp_server:cli"
+
+[project.urls]
+Homepage = "https://github.com/brettscharm/elm-mcp"
+Issues = "https://github.com/brettscharm/elm-mcp/issues"
+
+[tool.hatch.version]
+path = "doors_mcp_server.py"                # single source of truth: __version__ = "..."
+
+# Flat layout → spell out exactly what ships in the wheel and where. force-include
+# maps source path -> path inside the wheel (which becomes the install location),
+# bypassing package auto-detection entirely.
+[tool.hatch.build.targets.wheel.force-include]
+"doors_mcp_server.py"   = "doors_mcp_server.py"
+"doors_client.py"       = "doors_client.py"
+"query_engine.py"       = "query_engine.py"
+"create_engine.py"      = "create_engine.py"
+"semantic.py"           = "semantic.py"
+"selftest.py"           = "selftest.py"
+"traceability_gaps.py"  = "traceability_gaps.py"
+"change_impact.py"      = "change_impact.py"
+"impact_report.py"      = "impact_report.py"
+"compliance_packet.py"  = "compliance_packet.py"
+"compliance_report.py"  = "compliance_report.py"
+"elm_docs.py"           = "elm_docs.py"
+"xlsx_export.py"        = "xlsx_export.py"
+"html_report.py"        = "html_report.py"
+"jira_client.py"        = "jira_client.py"
+"req_quality.py"        = "req_quality.py"
+"compliance"            = "compliance"        # *.yaml framework templates (read at runtime)
+"requirements.txt"      = "requirements.txt"  # self-heal fallback message references it
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "*.py",
+  "compliance/**",
+  "modes/**",
+  "requirements*.txt",
+  "README.md",
+  "BOB.md",
+  "manifest.json",
+]

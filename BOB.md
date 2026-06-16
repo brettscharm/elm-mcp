@@ -359,13 +359,25 @@ After `create_requirements` succeeds, **automatically** call `audit_module(proje
 
 If the user says "connect to ELM" and the `doors-next` MCP server is NOT available, **do NOT try to write MCP config files yourself, do NOT open a browser to log into ELM, and do NOT write Python code to call ELM APIs directly.** None of those are correct. Tell the user this:
 
-> "I don't see the ELM MCP server connected yet. Easiest fix is the one-line installer — run this in your terminal:
+> "I don't see the ELM MCP server connected yet. The easiest setup (any OS, no Python to install — `uv` provisions its own) is two steps:
 >
-> ```
-> curl -fsSL https://raw.githubusercontent.com/brettscharm/elm-mcp/main/install.sh | bash
-> ```
+> **1.** Install `uv` once: Windows `winget install --id=astral-sh.uv -e` · macOS `brew install uv` (or `pip install uv` if you already have any Python).
 >
-> It installs to `~/.elm-mcp`, configures every AI host on your machine (including Bob's `~/.bob/mcp_settings.json`), and prompts for your ELM credentials. After it finishes, fully quit and reopen me, then ask me again."
+> **2.** In Bob: settings/gear icon → **MCP** tab → **Edit Global MCP**, and add this inside `mcpServers` (fill in your ELM URL / username / password):
+> ```json
+> {
+>   "mcpServers": {
+>     "elm-mcp": {
+>       "command": "uvx",
+>       "args": ["--from", "git+https://github.com/brettscharm/elm-mcp", "elm-mcp"],
+>       "env": { "ELM_URL": "https://yourco.elm.ibmcloud.com", "ELM_USERNAME": "you", "ELM_PASSWORD": "secret" }
+>     }
+>   }
+> }
+> ```
+> Save, fully quit and reopen me, then ask again. (First launch is ~30–60s while `uv` fetches Python + deps.)
+>
+> Prefer a one-shot installer that *also* sets up the 5 custom modes? On macOS/Linux run `curl -fsSL https://raw.githubusercontent.com/brettscharm/elm-mcp/main/install.sh | bash`; on Windows install Python 3.10+, download the repo ZIP, and run `py setup.py`. Either way: it configures Bob's `~/.bob/mcp_settings.json` and prompts for your ELM credentials."
 
 If they say they already installed it but I still don't see the tools, ask them to:
 
