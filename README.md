@@ -34,14 +34,20 @@ You need: macOS, Linux, **or Windows**; Python 3.10+ (the MCP SDK needs it — n
 curl -fsSL https://raw.githubusercontent.com/brettscharm/elm-mcp/main/install.sh | bash
 ```
 
-**Windows** — open PowerShell, paste this, hit Enter:
+**Windows** — do these **3 steps**. (The old PowerShell one-liner turned out to be fragile on locked-down / corporate Windows — proxies that intercept the download and return a web page instead of the script, or an old bundled Python — so the manual path is the reliable one.)
 
-```powershell
-irm https://raw.githubusercontent.com/brettscharm/elm-mcp/main/install.ps1 | iex
-```
+1. **Install Python 3.10+.** Skip if `py --version` already prints 3.10 or newer. Otherwise get it from [python.org/downloads](https://www.python.org/downloads/windows/), run the installer, and **check "Add python.exe to PATH"** at the bottom *before* clicking Install. Then close and reopen PowerShell.
+2. **Download the code.** Open [github.com/brettscharm/elm-mcp](https://github.com/brettscharm/elm-mcp) → green **Code** button → **Download ZIP** → right-click the downloaded file → **Extract All**. It extracts to a folder named `elm-mcp-main`. **Keep this folder** — Bob runs the server from here, so don't delete it after.
+3. **Run setup.** In PowerShell, `cd` into that folder and run `setup.py`:
+   ```powershell
+   cd $HOME\Downloads\elm-mcp-main
+   py setup.py
+   ```
 
-Either command:
-- Downloads ELM MCP to `~/.elm-mcp` (`%USERPROFILE%\.elm-mcp` on Windows)
+> *Prefer one command?* The one-liner `irm https://raw.githubusercontent.com/brettscharm/elm-mcp/main/install.ps1 | iex` still works **when Python 3.10+ is already installed and you're not behind a filtering proxy.** If it closes the window instantly or prints a wall of red errors, don't fight it — use the 3 steps above.
+
+Whichever path you use, it:
+- Puts ELM MCP on your machine (the macOS/Linux installer uses `~/.elm-mcp`; on Windows the ZIP lives wherever you extracted it)
 - Asks you for your ELM URL, username, password (typed at the prompt — never sent anywhere except your own machine)
 - Writes Bob's MCP config automatically (`~/.bob/settings/mcp_settings.json`)
 - **Installs the 5 custom modes** (🧭 Concierge, 📝 Plan, 📤 Push, 🎯 Impact Analyst, 📜 Compliance Auditor) — merged into Bob's modes, your other modes preserved

@@ -19,22 +19,30 @@ If you don't have an ELM environment, ask your admin for a sandbox project, or u
 
 ---
 
-## Step 1 — install (one command)
+## Step 1 — install
 
-**macOS / Linux** — open Terminal, paste, Enter:
+### macOS / Linux — one command
+
+Open Terminal, paste, Enter:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/brettscharm/elm-mcp/main/install.sh | bash
 ```
 
-**Windows** — open PowerShell, paste, Enter:
+### Windows — 3 steps
 
-```powershell
-irm https://raw.githubusercontent.com/brettscharm/elm-mcp/main/install.ps1 | iex
-```
+The Windows one-liner is fragile on locked-down / corporate machines (a proxy can intercept the download and hand back a web page instead of the script, and an old bundled Python fails outright). Do these 3 steps instead — they always work:
 
-That single command:
-1. Downloads elm-mcp to `~/.elm-mcp`
+1. **Install Python 3.10+.** Skip if `py --version` already prints 3.10 or newer. Otherwise get it from [python.org/downloads](https://www.python.org/downloads/windows/), run the installer, and **check "Add python.exe to PATH"** at the bottom *before* clicking Install. Close and reopen PowerShell afterward.
+2. **Download the code.** [github.com/brettscharm/elm-mcp](https://github.com/brettscharm/elm-mcp) → green **Code** button → **Download ZIP** → right-click → **Extract All**. You'll get a folder named `elm-mcp-main`. **Keep it** — Bob runs the server from there.
+3. **Run setup** in PowerShell:
+   ```powershell
+   cd $HOME\Downloads\elm-mcp-main
+   py setup.py
+   ```
+
+### Either way, it:
+1. Puts elm-mcp on your machine
 2. Installs dependencies
 3. Prompts for your ELM URL / username / password (saved locally only — never sent anywhere except your own ELM server)
 4. Writes Bob's MCP config automatically
@@ -92,11 +100,18 @@ Bob should respond with your DNG projects. **If you see your projects, you're do
 
 **"Missing dependencies" / Bob can't figure out what to install.** You don't have to — the server **self-heals**. The first time it starts with a Python that's missing dependencies, it installs them into that exact interpreter and restarts itself (you'll see `[elm-mcp] Auto-installing…` in Bob's MCP output panel; ~20–30s the first time, then instant). If it gives up after that, it prints the one command to run by hand — copy it as-is (it already points at the right Python).
 
-**The one-liner didn't prompt for my password / execution blocked.** Use the manual path (every OS):
+**Windows: the one-liner closed the window instantly, or printed a wall of red errors / "Redirecting…".** That's the `irm … | iex` one-liner failing, and it has two flavors:
+- **Window closes instantly** → it hit an error and exited (most often: no Python 3.10+ installed).
+- **Wall of red JavaScript errors, or `<title>Redirecting…</title>`** → a proxy (or a mistyped URL — note the dot in `raw.githubusercontent.com`) handed back a *web page* instead of the script, and PowerShell tried to run the page's HTML/JS.
+
+Don't retry the one-liner — use the **3-step Windows path in Step 1** (install Python → download ZIP → `py setup.py`). It can't hit either problem.
+
+**The one-liner didn't prompt for my password / execution blocked (any OS).** Use the manual path:
 ```bash
 git clone https://github.com/brettscharm/elm-mcp.git ~/.elm-mcp
 cd ~/.elm-mcp && python3 setup.py      # py setup.py on Windows
 ```
+On Windows without git, download the ZIP instead (Step 1 → Windows → 3 steps) and run `py setup.py` from the extracted folder.
 
 **Modes didn't show up.** Did you fully quit Bob? If still missing, re-install just the modes:
 ```bash
