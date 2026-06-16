@@ -28,23 +28,35 @@ You need: macOS, Linux, **or Windows**; Python 3.10+ (the MCP SDK needs it — n
 
 ### Step 1 — install
 
-Two ways in. **Option A is the easiest and the most reliable** — pick it if you've ever hit Python or install trouble.
+**Two separate paths — use the one for your computer.** Mac is one command; Windows is download-and-paste (no terminal).
 
-#### Option A (recommended) — `uv` + one paste · any OS · no Python setup
+---
 
-No clone, no `setup.py`, no manual `pip`, **no Python version headaches** — `uv` downloads its own Python 3.10+ and the dependencies on first launch. Two steps:
+#### 🍎 Mac / Linux
 
-1. **Install `uv`** once (a single small tool, no Python required):
-   - **Windows:** `winget install --id=astral-sh.uv -e`  *(run in any terminal — cmd or PowerShell)*
-   - **macOS:** `brew install uv`  *(or `curl -LsSf https://astral.sh/uv/install.sh | sh`)*
-   - Already have any Python (even 3.9)? `pip install uv` works too.
-2. **Add ELM MCP to Bob:** click Bob's settings/gear icon → **MCP** tab → **Edit Global MCP**, and add the `elm-mcp` block inside `mcpServers` (fill in your ELM details):
+Open Terminal, paste this, press Enter:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/brettscharm/elm-mcp/main/install.sh | bash
+```
+
+That's the whole install. It downloads ELM MCP, asks for your ELM URL / username / password, writes Bob's config, and installs the 5 custom modes. When it finishes, go to **Step 2**.
+
+---
+
+#### 🪟 Windows
+
+No terminal commands needed — just download, extract, and paste one block into Bob.
+
+1. **Download** — go to [github.com/brettscharm/elm-mcp](https://github.com/brettscharm/elm-mcp) → green **Code** button → **Download ZIP**.
+2. **Extract** — right-click the downloaded ZIP → **Extract All**. Note the folder it creates, e.g. `C:\Users\YOU\Downloads\elm-mcp-main`. **Keep it** — Bob runs the server from here.
+3. **Paste into Bob** — open Bob → settings/gear icon → **MCP** tab → **Edit Global MCP**. Paste the block below, then edit **two things**: the path on the `args` line (so it matches your folder from step 2), and your ELM details at the bottom.
    ```json
    {
      "mcpServers": {
        "elm-mcp": {
-         "command": "uvx",
-         "args": ["--from", "git+https://github.com/brettscharm/elm-mcp", "elm-mcp"],
+         "command": "py",
+         "args": ["C:/Users/YOU/Downloads/elm-mcp-main/doors_mcp_server.py"],
          "env": {
            "ELM_URL": "https://yourco.elm.ibmcloud.com",
            "ELM_USERNAME": "your-username",
@@ -54,29 +66,11 @@ No clone, no `setup.py`, no manual `pip`, **no Python version headaches** — `u
      }
    }
    ```
-   Save, then fully quit + reopen Bob. First launch takes ~30–60s while `uv` fetches Python + dependencies; after that it's instant.
+   Save the file. *(Use forward slashes `/` in the path — Windows accepts them and it avoids backslash headaches.)* Then go to **Step 2**.
 
-This runs **locally**, exactly like the installer version — your ELM password stays on your machine (it's only passed to the local server process, never to a third party). The one thing Option A doesn't set up is the **5 custom modes** (those come from Option B's `setup.py`). To update later: `uvx --refresh --from git+https://github.com/brettscharm/elm-mcp elm-mcp`.
+**Windows needs Python 3.10+.** Check with `py --version`; if it's missing or older, install it from [python.org](https://www.python.org/downloads/windows/) and tick **"Add python.exe to PATH"**. The server installs its own dependencies the first time Bob launches it (~30s) — there's nothing else to set up.
 
-#### Option B — the installer (also sets up the 5 custom modes)
-
-**macOS / Linux** — open Terminal, paste this, hit Enter:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/brettscharm/elm-mcp/main/install.sh | bash
-```
-
-**Windows** — do these **3 steps** (the PowerShell one-liner is fragile on locked-down / corporate Windows — proxies that hand back a web page instead of the script, or an old bundled Python):
-
-1. **Install Python 3.10+** — [python.org/downloads](https://www.python.org/downloads/windows/), and **check "Add python.exe to PATH"** before clicking Install.
-2. **Download the code** — [github.com/brettscharm/elm-mcp](https://github.com/brettscharm/elm-mcp) → green **Code** → **Download ZIP** → right-click → **Extract All** (folder `elm-mcp-main`; keep it — Bob runs the server from there).
-3. **Run setup** — in PowerShell: `cd $HOME\Downloads\elm-mcp-main`, then `py setup.py`.
-
-The installer (either OS) also:
-- Asks for your ELM URL / username / password (typed at the prompt — never sent anywhere except your own machine)
-- Writes Bob's MCP config automatically (`~/.bob/settings/mcp_settings.json`)
-- **Installs the 5 custom modes** (🧭 Concierge, 📝 Plan, 📤 Push, 🎯 Impact Analyst, 📜 Compliance Auditor) — merged into Bob's modes, your other modes preserved
-- Verifies the whole thing works end-to-end
+> **Want the 5 custom modes auto-installed too?** From the extracted folder, run `py setup.py` once — it writes Bob's config for you and adds the modes (🧭 Concierge, 📝 Plan, 📤 Push, 🎯 Impact Analyst, 📜 Compliance Auditor). Otherwise the paste above already gives you every tool, just not the mode presets.
 
 > **Dependencies just work.** Even if Bob launches the server with a different Python than the installer used (the #1 cause of "missing dependency" failures), the server **self-heals** on first start — it installs its own dependencies into whatever interpreter Bob uses, then restarts. No guessing, no manual `pip install`.
 

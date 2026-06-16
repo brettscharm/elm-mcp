@@ -21,18 +21,31 @@ If you don't have an ELM environment, ask your admin for a sandbox project, or u
 
 ## Step 1 — install
 
-### Easiest, any OS — `uv` + one paste (no Python to install)
+**Use the path for your computer.** Mac is one command; Windows is download-and-paste (no terminal).
 
-If you've hit Python/install trouble, use this. `uv` downloads its own Python 3.10+ and the dependencies — you don't install or manage Python at all.
+### 🍎 Mac / Linux
 
-1. **Install `uv`** once: Windows `winget install --id=astral-sh.uv -e` · macOS `brew install uv` (or `pip install uv` if you already have any Python).
-2. In Bob: **settings/gear icon → MCP tab → Edit Global MCP**, and add this inside `mcpServers` (fill in your ELM details):
+Open Terminal, paste, Enter:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/brettscharm/elm-mcp/main/install.sh | bash
+```
+
+That single command puts elm-mcp on your machine, installs dependencies, prompts for your ELM URL / username / password, writes Bob's config, and installs the 5 custom modes. When it finishes, go to **Step 2**.
+
+### 🪟 Windows
+
+No terminal commands — download, extract, paste one block into Bob.
+
+1. **Download** — [github.com/brettscharm/elm-mcp](https://github.com/brettscharm/elm-mcp) → green **Code** button → **Download ZIP**.
+2. **Extract** — right-click the ZIP → **Extract All**. Note the folder it creates, e.g. `C:\Users\YOU\Downloads\elm-mcp-main`. **Keep it** — Bob runs the server from here.
+3. **Paste into Bob** — Bob → settings/gear icon → **MCP** tab → **Edit Global MCP**. Paste the block below, then edit **two things**: the path on the `args` line (match your folder from step 2) and your ELM details at the bottom.
    ```json
    {
      "mcpServers": {
        "elm-mcp": {
-         "command": "uvx",
-         "args": ["--from", "git+https://github.com/brettscharm/elm-mcp", "elm-mcp"],
+         "command": "py",
+         "args": ["C:/Users/YOU/Downloads/elm-mcp-main/doors_mcp_server.py"],
          "env": {
            "ELM_URL": "https://yourco.elm.ibmcloud.com",
            "ELM_USERNAME": "your-username",
@@ -42,36 +55,11 @@ If you've hit Python/install trouble, use this. `uv` downloads its own Python 3.
      }
    }
    ```
+   Save. *(Use forward slashes `/` in the path.)* Then go to **Step 2**.
 
-First launch takes ~30–60s while `uv` fetches Python + deps. Trade-off: this path doesn't install the 5 custom modes (the installer below does) — but all the tools work. Skip to Step 2 if you used this.
+**Windows needs Python 3.10+** — check with `py --version`; if missing/older, install from [python.org/downloads](https://www.python.org/downloads/windows/) and tick **"Add python.exe to PATH"**. The server installs its own dependencies the first time Bob launches it (~30s).
 
-### Installer — one command (macOS / Linux)
-
-Open Terminal, paste, Enter:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/brettscharm/elm-mcp/main/install.sh | bash
-```
-
-### Windows — 3 steps
-
-The Windows one-liner is fragile on locked-down / corporate machines (a proxy can intercept the download and hand back a web page instead of the script, and an old bundled Python fails outright). Do these 3 steps instead — they always work:
-
-1. **Install Python 3.10+.** Skip if `py --version` already prints 3.10 or newer. Otherwise get it from [python.org/downloads](https://www.python.org/downloads/windows/), run the installer, and **check "Add python.exe to PATH"** at the bottom *before* clicking Install. Close and reopen PowerShell afterward.
-2. **Download the code.** [github.com/brettscharm/elm-mcp](https://github.com/brettscharm/elm-mcp) → green **Code** button → **Download ZIP** → right-click → **Extract All**. You'll get a folder named `elm-mcp-main`. **Keep it** — Bob runs the server from there.
-3. **Run setup** in PowerShell:
-   ```powershell
-   cd $HOME\Downloads\elm-mcp-main
-   py setup.py
-   ```
-
-### Either way, it:
-1. Puts elm-mcp on your machine
-2. Installs dependencies
-3. Prompts for your ELM URL / username / password (saved locally only — never sent anywhere except your own ELM server)
-4. Writes Bob's MCP config automatically
-5. **Installs the 5 custom modes** (Concierge, Plan, Push, Impact Analyst, Compliance Auditor) — your other modes are preserved
-6. Runs an end-to-end smoke test
+> **Want the 5 custom modes too?** From the extracted folder, run `py setup.py` once — it writes Bob's config and adds the modes. Otherwise the paste above gives you every tool, just not the mode presets.
 
 ---
 

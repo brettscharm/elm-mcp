@@ -359,25 +359,31 @@ After `create_requirements` succeeds, **automatically** call `audit_module(proje
 
 If the user says "connect to ELM" and the `doors-next` MCP server is NOT available, **do NOT try to write MCP config files yourself, do NOT open a browser to log into ELM, and do NOT write Python code to call ELM APIs directly.** None of those are correct. Tell the user this:
 
-> "I don't see the ELM MCP server connected yet. The easiest setup (any OS, no Python to install — `uv` provisions its own) is two steps:
+> "I don't see the ELM MCP server connected yet. Setup depends on your computer:
 >
-> **1.** Install `uv` once: Windows `winget install --id=astral-sh.uv -e` · macOS `brew install uv` (or `pip install uv` if you already have any Python).
+> **🍎 On Mac/Linux** — one command in Terminal:
+> ```
+> curl -fsSL https://raw.githubusercontent.com/brettscharm/elm-mcp/main/install.sh | bash
+> ```
+> It downloads everything, asks for your ELM URL / username / password, configures me, and installs the 5 custom modes.
 >
-> **2.** In Bob: settings/gear icon → **MCP** tab → **Edit Global MCP**, and add this inside `mcpServers` (fill in your ELM URL / username / password):
+> **🪟 On Windows** — download + paste, no terminal:
+> 1. Go to https://github.com/brettscharm/elm-mcp → green **Code** button → **Download ZIP**, then right-click → **Extract All** (note the folder, e.g. `C:\Users\YOU\Downloads\elm-mcp-main`).
+> 2. In Bob: settings/gear icon → **MCP** tab → **Edit Global MCP**, and paste this — editing the `args` path to match your folder, and your ELM details:
 > ```json
 > {
 >   "mcpServers": {
 >     "elm-mcp": {
->       "command": "uvx",
->       "args": ["--from", "git+https://github.com/brettscharm/elm-mcp", "elm-mcp"],
+>       "command": "py",
+>       "args": ["C:/Users/YOU/Downloads/elm-mcp-main/doors_mcp_server.py"],
 >       "env": { "ELM_URL": "https://yourco.elm.ibmcloud.com", "ELM_USERNAME": "you", "ELM_PASSWORD": "secret" }
 >     }
 >   }
 > }
 > ```
-> Save, fully quit and reopen me, then ask again. (First launch is ~30–60s while `uv` fetches Python + deps.)
+> (Windows needs Python 3.10+ — check with `py --version`. The server installs its own dependencies on first launch.)
 >
-> Prefer a one-shot installer that *also* sets up the 5 custom modes? On macOS/Linux run `curl -fsSL https://raw.githubusercontent.com/brettscharm/elm-mcp/main/install.sh | bash`; on Windows install Python 3.10+, download the repo ZIP, and run `py setup.py`. Either way: it configures Bob's `~/.bob/mcp_settings.json` and prompts for your ELM credentials."
+> Either way: once done, fully quit and reopen me, then ask again."
 
 If they say they already installed it but I still don't see the tools, ask them to:
 
