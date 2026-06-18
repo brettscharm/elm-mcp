@@ -176,10 +176,45 @@ load_dotenv()
 # decide if a newer GitHub release exists; the `connect_to_elm`
 # response also surfaces it so users always know what version they're
 # running.
-__version__ = "0.31.6"
+__version__ = "0.31.7"
 GITHUB_REPO = "brettscharm/elm-mcp"
 
-app = Server("elm-mcp")
+# Server-level instructions — surfaced to the AI host through the MCP protocol
+# itself (the `instructions` field of the initialize result). Unlike BOB.md
+# (Bob-specific, only loaded if the repo is present), this briefs EVERY host
+# — Bob, Claude, Cursor — on what the server is and which tool to reach for.
+# Keep it tight: it's injected into the model's context every session.
+_SERVER_INSTRUCTIONS = """\
+elm-mcp drives IBM Engineering Lifecycle Management (ELM) from an AI assistant. \
+One login spans five domains: DNG (DOORS Next — requirements & modules), EWM \
+(work items: tasks, stories, defects), ETM (test plans/cases/results), GCM \
+(global configurations), and SCM (change-sets & code reviews).
+
+Getting started: call `connect_to_elm` first (or it auto-connects from the \
+ELM_URL / ELM_USERNAME / ELM_PASSWORD environment variables). `list_capabilities` \
+returns the full menu of tools grouped by task.
+
+Routing — pick the right tool instead of guessing:
+- Natural-language questions ("show me approved requirements", "what changed \
+this week", "find the tests for login") → `query_elm`. It spans DNG/EWM/ETM, \
+does semantic search, and looks items up by ID.
+- Creating artifacts from natural language → `create_elm`. It is PREVIEW-FIRST: \
+always show the preview and get explicit user approval before committing.
+- Requirements belong in DNG as real, linkable artifacts — use \
+`create_requirements` / `get_module_requirements` / `update_requirement`. Never \
+write requirements into a local markdown or text file; that defeats the purpose.
+- A whole project from an idea → `build_new_project` (phase-gated: requirements \
+→ tasks → tests → approval → code, with user sign-off between phases).
+- Analysis → `analyze_change_impact`, `find_traceability_gaps`, \
+`generate_compliance_packet`, `generate_traceability_matrix`.
+- Update this server → `update_elm_mcp` (one call; do not run git/pip by hand).
+
+Gotchas: enum attributes (Status, Priority) expose both a numeric value and a \
+`literalName` — read the literalName. Artifact identifiers are integers. Binding \
+requirements into modules requires DNG Configuration Management (CM) enabled on \
+the project. Read-only tools are safe to run freely; write operations change ELM."""
+
+app = Server("elm-mcp", version=__version__, instructions=_SERVER_INSTRUCTIONS)
 
 # ── Auto-update on server startup ─────────────────────────────
 # When Bob (or any MCP host) launches this server, we transparently
