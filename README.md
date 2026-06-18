@@ -19,7 +19,7 @@ You need: macOS, Linux, **or Windows**; Python 3.10+ (the MCP SDK needs it — n
 > ELM MCP is built around the full DNG flow — modules, baselines, streams, traceability — which **all require IBM's configuration management (CM) feature** on the DNG project. Without CM:
 > - You can still create requirements (in folders)
 > - You **cannot** bind requirements into modules programmatically — there is no DNG API path for this on non-CM projects (verified against IBM's own ELM-Python-Client)
-> - You **cannot** baseline requirements at Phase 5 of `/build-project`
+> - You **cannot** baseline requirements at Phase 5 of `/build-new-project`
 > - You **cannot** use streams for parallel requirements work
 >
 > **If your DNG project doesn't have CM enabled:** ask your DNG admin to enable it (one project-level toggle in DNG admin; doesn't break existing data). Most enterprise ELM customers have CM on by default.
@@ -182,7 +182,7 @@ See `BOB.md` Step 3l for the full workflow.
 
 ## What it actually does (for the curious)
 
-ELM MCP is a Model Context Protocol server. It exposes IBM Engineering Lifecycle Management — DNG (requirements), EWM (work items / tasks / defects), ETM (test management), GCM (global config), and SCM/code-review — as **62 tools and 10 prompts** that any MCP-speaking AI assistant can call. Bob is one such assistant; Claude Code, Cursor, Windsurf are others.
+ELM MCP is a Model Context Protocol server. It exposes IBM Engineering Lifecycle Management — DNG (requirements), EWM (work items / tasks / defects), ETM (test management), GCM (global config), and SCM/code-review — as **83 tools and 15 prompts** that any MCP-speaking AI assistant can call. Bob is one such assistant; Claude Code, Cursor, Windsurf are others.
 
 The MCP itself does **zero AI generation**. Every tool is a deterministic API call against ELM. The intelligence — writing requirements, parsing PDFs, picking the right module — comes from whichever AI you connect.
 
@@ -243,7 +243,7 @@ For air-gapped / locked-down environments where automatic config-write doesn't w
 ```
 ~/.elm-mcp/
 ├── setup.py                  # Installer (this is what install.sh runs)
-├── doors_mcp_server.py       # The MCP server itself (62 tools)
+├── doors_mcp_server.py       # The MCP server itself (83 tools)
 ├── doors_client.py           # ELM REST client (DNG + EWM + ETM + GCM + SCM)
 ├── BOB.md                    # Instructions Bob reads automatically
 ├── README.md                 # This file
@@ -274,6 +274,6 @@ Copy-paste-ready blurb:
 > ```
 > Restart Bob. Say *"connect to ELM and list my projects."*
 >
-> 62 tools, 10 prompts. Read/write requirements (rich text + tables + images), build full projects end-to-end with traceable code, import Jira epics, see what your team's been up to. Full details: https://github.com/brettscharm/elm-mcp
+> 83 tools, 15 prompts. Read/write requirements (rich text + tables + images), build full projects end-to-end with traceable code, import Jira epics, see what your team's been up to. Full details: https://github.com/brettscharm/elm-mcp
 >
 > ⚠️ Personal passion project — NOT an official IBM tool.

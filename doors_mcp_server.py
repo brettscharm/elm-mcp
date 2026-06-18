@@ -176,7 +176,7 @@ load_dotenv()
 # decide if a newer GitHub release exists; the `connect_to_elm`
 # response also surfaces it so users always know what version they're
 # running.
-__version__ = "0.31.8"
+__version__ = "0.31.9"
 GITHUB_REPO = "brettscharm/elm-mcp"
 
 # Server-level instructions — surfaced to the AI host through the MCP protocol
@@ -7943,7 +7943,7 @@ async def _dispatch_tool(name: str, arguments: Any) -> list[TextContent]:
 
             # Use-case-first layout. Each section answers a USER intent
             # ("I want to..."), shows the FIRST thing to call, then the
-            # follow-on tools that flow from it. Reduces "60 tools" to
+            # follow-on tools that flow from it. Reduces "83 tools" to
             # ~10 entry points the user actually picks from.
             lines = [
                 f"# ELM MCP — what I can do (v{__version__})",
@@ -11612,7 +11612,14 @@ async def _dispatch_tool(name: str, arguments: Any) -> list[TextContent]:
 # ── Main ──────────────────────────────────────────────────────
 
 async def main():
-    logger.info(f"IBM ELM MCP Server v{__version__} starting (62 tools, 10 prompts, 3 resource templates)")
+    # Counts computed live so this line can never go stale as tools/prompts change.
+    _n_tools = len(await list_tools())
+    _n_prompts = len(await list_prompts())
+    _n_templates = len(await list_resource_templates())
+    logger.info(
+        f"IBM ELM MCP Server v{__version__} starting "
+        f"({_n_tools} tools, {_n_prompts} prompts, {_n_templates} resource templates)"
+    )
     async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
         await app.run(read_stream, write_stream, app.create_initialization_options())
 

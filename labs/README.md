@@ -62,7 +62,7 @@ Whatever your role — business analyst, systems engineer, QA or dev lead, or ju
 These labs assume:
 
 - An IBM Bob installation (any host: Claude Code, Cursor, VS Code with the Bob/Claude extension, etc.)
-- An IBM ELM deployment (cloud goblue, on-prem, or trial) with read access to at least one DNG project
+- An IBM ELM deployment (cloud, on-prem, or trial) with read access to at least one DNG project
 - Comfort copying/pasting commands in a terminal
 - No ELM expertise required — concepts are explained as they come up
 

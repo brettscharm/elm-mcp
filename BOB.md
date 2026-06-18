@@ -2,7 +2,7 @@
 
 > **DISCLAIMER:** This is a personal passion project. NOT an official IBM product, NOT created or endorsed by the ELM development team. Use at your own risk. IBM, DOORS Next, ELM, EWM, and ETM are trademarks of IBM Corporation.
 
-This MCP server connects you to IBM Engineering Lifecycle Management (ELM) — DNG (requirements), EWM (work items), ETM (test management), GCM (global config), and SCM (code / change-sets / reviews). 73 tools + 15 prompts. All the heavy lifting is done by the MCP tools — you do NOT need to write any Python code.
+This MCP server connects you to IBM Engineering Lifecycle Management (ELM) — DNG (requirements), EWM (work items), ETM (test management), GCM (global config), and SCM (code / change-sets / reviews). 83 tools + 15 prompts. All the heavy lifting is done by the MCP tools — you do NOT need to write any Python code.
 
 ## 🛑🛑🛑 THE TWO RULES YOU CANNOT BREAK
 
@@ -52,7 +52,7 @@ This MCP is built for **CM-enabled DNG projects**. Without CM, several core oper
 |---|---|
 | Create requirements in a folder | ✅ Works |
 | Bind requirements into a module | ❌ No API path — reqs sit loose in folder |
-| Baseline at Phase 5 of `/build-project` | ❌ Not available |
+| Baseline at Phase 5 of `/build-new-project` | ❌ Not available |
 | Streams for parallel work | ❌ Not available |
 | Drift detection at Phase 6 | ⚠️ Degraded (timestamp-only) |
 
@@ -86,7 +86,7 @@ The MCP has 60+ tools but the user mostly invokes ~10 starting points. Find thei
 | *"are you connected"* / *"what version"* / *"is something broken"* | `elm_mcp_health` | One-shot diagnostic |
 | *"update yourself"* | `update_elm_mcp` | Single tool call, no per-step prompts |
 
-**The point of this table:** the user doesn't experience "60 tools" — they experience these 17 starting points. Most flows take care of the rest internally. If the intent doesn't match cleanly, invoke `/getting-started` rather than dumping a tool list.
+**The point of this table:** the user doesn't experience "83 tools" — they experience these 17 starting points. Most flows take care of the rest internally. If the intent doesn't match cleanly, invoke `/getting-started` rather than dumping a tool list.
 
 ## 🛑 NEVER ignore a module-bind warning from `create_requirements`
 
@@ -273,7 +273,7 @@ This is BOB's job: get the user enough rigor that they SEE the gap that Requirem
 
 ### Status-aware refusals
 
-When the user asks BOB to generate downstream artifacts (tasks via `create_task`, test cases via `create_test_case`, code via `/build-project`), BOB **proactively** runs `audit_module` against the source requirements first. If <80% are Approved, BOB stops and asks:
+When the user asks BOB to generate downstream artifacts (tasks via `create_task`, test cases via `create_test_case`, code via `/build-new-project`), BOB **proactively** runs `audit_module` against the source requirements first. If <80% are Approved, BOB stops and asks:
 
 > *"Heads up — only N of M source requirements are currently **Approved** (the rest are Draft / In Review). Generating tasks or tests from non-Approved requirements means rework when reqs change. Want me to (a) audit them first so you can drive a review cycle, (b) generate anyway with a `[AI Generated] Note: derived from non-Approved reqs` warning stamped, or (c) hold until reqs are reviewed?"*
 
@@ -394,7 +394,7 @@ To verify the server itself works (independent of any AI host) the user can run 
 ```
 cd ~/.elm-mcp && python3 setup.py --diagnose
 ```
-That launches the MCP server in a subprocess, runs the protocol handshake, and prints whether all 36 tools register and ELM auth works.
+That launches the MCP server in a subprocess, runs the protocol handshake, and prints whether all 83 tools register and ELM auth works.
 
 After the MCP server is available, proceed to the workflow below.
 
@@ -698,15 +698,15 @@ This is the ONE place the interview pattern lives. Don't re-invent per-flow.
 When a tool returns artifact URLs (modules, requirements, tasks, test cases, defects, anything), **render them as markdown links in the format `[Title](url)`** so the user can click straight through to that artifact in DNG/EWM/ETM.
 
 **❌ NEVER do this:**
-> "View the modules in DOORS Next at: https://goblue.clm.ibmcloud.com/rm"
+> "View the modules in DOORS Next at: https://yourco.elm.ibmcloud.com/rm"
 
 This is a useless generic landing page. The user has to navigate from there to find what was just created.
 
 **✅ ALWAYS do this:**
 > "Created 3 modules:
-> - [Business Requirements](https://goblue.clm.ibmcloud.com/rm/resources/MD_aaa)
-> - [Stakeholder Requirements](https://goblue.clm.ibmcloud.com/rm/resources/MD_bbb)
-> - [System Requirements](https://goblue.clm.ibmcloud.com/rm/resources/MD_ccc)"
+> - [Business Requirements](https://yourco.elm.ibmcloud.com/rm/resources/MD_aaa)
+> - [Stakeholder Requirements](https://yourco.elm.ibmcloud.com/rm/resources/MD_bbb)
+> - [System Requirements](https://yourco.elm.ibmcloud.com/rm/resources/MD_ccc)"
 
 Each tool that creates or modifies an artifact returns the artifact's full URL. Surface it. Don't truncate it. Don't paraphrase. Don't substitute a base-domain URL.
 
@@ -1391,7 +1391,7 @@ If the user picks 1/2/3, run Step 3d / 3e against the System Requirements URLs f
 
 ### Step 3h: BUILD-PROJECT Path (end-to-end agentic dev with ELM as source of truth)
 
-When the user says **"build a project"**, **"do an end-to-end build"**, **"agentic development"**, or invokes the `/build-project` prompt — run this 9-phase sequence. This is the headline demo: a one-line idea becomes fully-traced requirements + tasks + test cases in ELM, then the user reviews them in ELM, then the AI writes the actual code based on the finalized state.
+When the user says **"build a project"**, **"do an end-to-end build"**, **"agentic development"**, or invokes the `/build-new-project` prompt — run this 9-phase sequence. This is the headline demo: a one-line idea becomes fully-traced requirements + tasks + test cases in ELM, then the user reviews them in ELM, then the AI writes the actual code based on the finalized state.
 
 **How the gate is enforced — call the `build_project_next` tool between phases.**
 
@@ -1513,7 +1513,7 @@ This path is invoked by:
 - The `/import-requirements` prompt explicitly
 - Trigger phrases: *"I have requirements already"*, *"we wrote them in Jira"*, *"import these"*, *"here are our reqs, put them in DNG"*
 - The user pastes a clearly-requirement-shaped chunk of text without a generation request
-- `/build-project` Phase 1 — when user picks path (b) "I have existing reqs"
+- `/build-new-project` Phase 1 — when user picks path (b) "I have existing reqs"
 
 #### What you do
 
@@ -1588,7 +1588,7 @@ This is the multi-artifact extension of Step 3j — instead of one DNG module, y
 
 8. **Post-push report:** every URL as a markdown link, plus every default-choice you made when "push with defaults" was used.
 
-9. **Offer the natural next step:** *"Want me to /build-project from this state? I'd skip Phases 1–4 (artifacts already created), pick up at Phase 5 (your review in ELM), then re-pull current state and write the actual code."*
+9. **Offer the natural next step:** *"Want me to /build-new-project from this state? I'd skip Phases 1–4 (artifacts already created), pick up at Phase 5 (your review in ELM), then re-pull current state and write the actual code."*
 
 #### Anti-patterns
 
