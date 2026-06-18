@@ -157,7 +157,7 @@ logging.basicConfig(
 logger = logging.getLogger("elm-mcp")
 from mcp.server import Server
 from mcp.types import (
-    Tool, TextContent,
+    Tool, ToolAnnotations, TextContent,
     Resource, ResourceTemplate, BlobResourceContents, TextResourceContents,
     Prompt, PromptMessage, PromptArgument,
 )
@@ -176,7 +176,7 @@ load_dotenv()
 # decide if a newer GitHub release exists; the `connect_to_elm`
 # response also surfaces it so users always know what version they're
 # running.
-__version__ = "0.31.7"
+__version__ = "0.31.8"
 GITHUB_REPO = "brettscharm/elm-mcp"
 
 # Server-level instructions — surfaced to the AI host through the MCP protocol
@@ -3500,9 +3500,52 @@ _TESTCASE_GATE = (
 )
 
 
+# Tools that only READ from ELM (or local state) — safe for a host to run
+# without a write confirmation. Everything NOT listed here mutates ELM, writes
+# a local file (reports/charts/xlsx), or changes the install, so it's annotated
+# as a write. No tool in this server deletes data, so writes are non-destructive
+# (destructiveHint=False).
+_READ_ONLY_TOOLS = frozenset({
+    "list_capabilities", "connect_to_elm", "list_projects", "get_modules",
+    "get_module_requirements", "find_folder", "get_link_types",
+    "search_requirements", "get_artifact_types", "list_baselines",
+    "compare_baselines", "list_global_configurations", "list_global_components",
+    "get_global_config_details", "get_attribute_definitions",
+    "get_workflow_states", "query_work_items", "query_elm",
+    "resolve_requirement_id", "resolve_user", "list_test_cases",
+    "list_test_plans", "list_test_execution_records", "get_ewm_workitem_types",
+    "elm_mcp_health", "elm_mcp_selftest", "get_jira_issue", "search_jira_issues",
+    "jira_health", "lint_requirement_text", "lint_requirements_batch",
+    "audit_module", "coach_requirement", "get_elm_docs_links",
+    "find_similar_requirements", "find_traceability_gaps",
+    "analyze_change_impact", "scm_list_projects", "scm_list_changesets",
+    "scm_get_changeset", "scm_get_workitem_changesets", "review_get",
+    "review_list_open", "extract_pdf", "get_team_actions",
+    "build_project_status",
+})
+
+
+def _annotate_tools(tools: "list[Tool]") -> "list[Tool]":
+    """Attach MCP tool annotations so hosts know which tools are safe reads vs.
+    ELM-mutating writes. `readOnlyHint` is the signal a host uses to decide
+    whether a tool can run without a confirmation prompt; `openWorldHint` is
+    True for every tool here because they all talk to an external system
+    (ELM / Jira)."""
+    out = []
+    for t in tools:
+        if t.name in _READ_ONLY_TOOLS:
+            ann = ToolAnnotations(readOnlyHint=True, idempotentHint=True,
+                                  openWorldHint=True)
+        else:
+            ann = ToolAnnotations(readOnlyHint=False, destructiveHint=False,
+                                  openWorldHint=True)
+        out.append(t.model_copy(update={"annotations": ann}))
+    return out
+
+
 @app.list_tools()
 async def list_tools() -> list[Tool]:
-    return [
+    _tools = [
         # `build_project` legacy tool removed in v0.5.0 — use
         # build_new_project (greenfield) or build_from_existing
         # (brownfield) instead.
@@ -5956,6 +5999,7 @@ async def list_tools() -> list[Tool]:
             }
         ),
     ]
+    return _annotate_tools(_tools)
 
 
 # ── Tool Handlers ─────────────────────────────────────────────
