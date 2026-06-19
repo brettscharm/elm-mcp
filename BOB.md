@@ -2,7 +2,7 @@
 
 > **DISCLAIMER:** This is a personal passion project. NOT an official IBM product, NOT created or endorsed by the ELM development team. Use at your own risk. IBM, DOORS Next, ELM, EWM, and ETM are trademarks of IBM Corporation.
 
-This MCP server connects you to IBM Engineering Lifecycle Management (ELM) — DNG (requirements), EWM (work items), ETM (test management), GCM (global config), and SCM (code / change-sets / reviews). 83 tools + 15 prompts. All the heavy lifting is done by the MCP tools — you do NOT need to write any Python code.
+This MCP server connects you to IBM Engineering Lifecycle Management (ELM) — DNG (requirements), EWM (work items), ETM (test management), GCM (global config), and SCM (code / change-sets / reviews). 84 tools + 15 prompts. All the heavy lifting is done by the MCP tools — you do NOT need to write any Python code.
 
 ## 🛑🛑🛑 THE TWO RULES YOU CANNOT BREAK
 
@@ -85,8 +85,9 @@ The MCP has 60+ tools but the user mostly invokes ~10 starting points. Find thei
 | *"what can you do"* / *"help"* / *"where do I start"* | `/getting-started` | Routes their natural-language intent to the right starting point |
 | *"are you connected"* / *"what version"* / *"is something broken"* | `elm_mcp_health` | One-shot diagnostic |
 | *"update yourself"* | `update_elm_mcp` | Single tool call, no per-step prompts |
+| *"I don't see the modes"* / *"install the ELM modes"* | `install_elm_modes` | Installs/refreshes the 5 Bob modes; tell the user to restart Bob after |
 
-**The point of this table:** the user doesn't experience "83 tools" — they experience these 17 starting points. Most flows take care of the rest internally. If the intent doesn't match cleanly, invoke `/getting-started` rather than dumping a tool list.
+**The point of this table:** the user doesn't experience "84 tools" — they experience these 17 starting points. Most flows take care of the rest internally. If the intent doesn't match cleanly, invoke `/getting-started` rather than dumping a tool list.
 
 ## 🛑 NEVER ignore a module-bind warning from `create_requirements`
 
@@ -145,6 +146,7 @@ Before doing anything, check what the user actually wants. The mapping below cat
 | User's message clearly isn't about ELM (code debugging, IDE config, general programming Q&A) | **Step aside** — say one line, let Bob's default behavior (Code/Ask modes) take over. Do NOT pretend to know which built-in mode is right. | argue with the user; try to be helpful by attempting non-ELM work yourself |
 | ANY request for IBM ELM / DOORS / Bob documentation URLs — "where are the docs for X" / "ELM 7.1 upgrade guide" / "system requirements" / "what's new" / "DXL reference" / "RQA / AI Hub" / "OSLC spec" / "Bob docs" | call `get_elm_docs_links(topic=…, version=…)` — returns the curated set of known-good URLs. Pass `verify_live=true` if accuracy matters. | **NEVER generate IBM doc URLs from your training data — they go stale fast as IBM reorganizes its docs.** If a user reports a dead link from this tool, file a GitHub issue against elm-mcp |
 | "update yourself" / "are you up to date" / "pull the latest" / "update the MCP" / "update this server" / "update the elm mcp" | call `update_elm_mcp` ONCE — that's the entire update. **DO NOT run individual `git fetch` / `git pull` / `pip install` / `restart` commands via Bash** — `update_elm_mcp` does all of that internally in a single tool call so the user is prompted at most once (and zero times if `update_elm_mcp` is in their `alwaysAllow`). | run a series of bash commands. The user explicitly said this is friction — eight per-step approvals when one tool call is enough. The tool handles fetch + pull + version comparison + restart-instructions internally. Just call it. |
+| "I don't see the modes" / "install the elm modes" / "add the concierge mode" / "set up the modes" / "the modes are missing" / "refresh the modes" | call `install_elm_modes` ONCE — it merges the 5 modes into Bob's config (keeping the user's other modes) and copies the playbooks. Then tell the user to **fully quit and reopen Bob** (modes load at startup). **DO NOT** go hunting for npm packages, files, `mcp.json`, or tell the user to run `setup.py` in a terminal — `install_elm_modes` is a connected tool; just call it. The whole point is no terminal. | search the filesystem or hand the user shell commands |
 | "what's the team doing?" / "what did Sarah do yesterday?" / "who's stuck?" / "team status" | call `get_team_actions` (with optional `who` / `since` / `status` filters) | manually list each user's runs — `get_team_actions` reads the BOB Team Actions module which is auto-populated as the team works |
 | "wrap up" / "I'm done for today" / "good for now" / "pausing" / "/wrap-up" — user signals they're stopping their session | call `wrap_up_session` ONCE with their verbatim notes as `notes=`. This flushes a final entry to BOB Team Actions so teammates see what state the user paused in. | leave the session unwrapped — the auto-log entries are mid-window, not closing. The wrap-up entry tags the session as Completed/Hand-off/Stuck/Paused so anyone reading later knows whether to pick it up |
 | "what can you do?" / "list your tools" / "help" | call `list_capabilities` | enumerate tools from memory |
@@ -394,7 +396,7 @@ To verify the server itself works (independent of any AI host) the user can run 
 ```
 cd ~/.elm-mcp && python3 setup.py --diagnose
 ```
-That launches the MCP server in a subprocess, runs the protocol handshake, and prints whether all 83 tools register and ELM auth works.
+That launches the MCP server in a subprocess, runs the protocol handshake, and prints whether all 84 tools register and ELM auth works.
 
 After the MCP server is available, proceed to the workflow below.
 

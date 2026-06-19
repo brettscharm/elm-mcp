@@ -884,26 +884,9 @@ def print_config() -> int:
 
 # ── mode auto-install ────────────────────────────────────────
 
-# elm-mcp custom-mode slugs. The mode installer OWNS these slugs — on
-# install it removes any existing copies and re-adds the current version,
-# leaving every OTHER mode in the user's Bob config untouched.
-_ELM_MODE_SLUGS = (
-    "concierge",
-    "requirements-planner",
-    "requirements-pusher",
-    "impact-analyst",
-    "compliance-auditor",
-)
-
-
-def _yaml_block_str_representer(dumper, data):
-    """Force PyYAML to use literal block style (|) for any multi-line
-    string so the big roleDefinition / customInstructions markdown blocks
-    stay readable in Bob's custom_modes.yaml (matches Bob's own format)."""
-    if "\n" in data:
-        return dumper.represent_scalar("tag:yaml.org,2002:str", data,
-                                        style="|")
-    return dumper.represent_scalar("tag:yaml.org,2002:str", data)
+# NOTE: the mode-merge logic + the owned slugs + the YAML block-style
+# representer now live in modes_install.py (single source of truth, shared
+# with the install_elm_modes MCP tool). install_modes() below just delegates.
 
 
 def install_modes(home: Path) -> bool:
@@ -926,101 +909,21 @@ def install_modes(home: Path) -> bool:
              "(Modes are a Bob feature; other hosts don't use them.)")
         return False
 
-    modes_dir = HERE / "modes"
-    src_yaml = modes_dir / "custom_modes.yaml"
-    if not src_yaml.exists():
-        warn(f"modes/custom_modes.yaml not found — skipping mode install.")
-        return False
-
+    # Delegate the actual merge/copy to modes_install — the SAME logic the
+    # `install_elm_modes` MCP tool and the update-self refresh use, so an
+    # installer run and an in-app "install the modes" can never diverge.
     try:
-        import yaml
-    except ImportError:
-        warn("PyYAML not importable — skipping mode install. "
-             "Run `pip install pyyaml` then re-run setup.")
-        return False
-
-    yaml.add_representer(str, _yaml_block_str_representer)
-
-    # ── Load our modes ──────────────────────────────────────────
-    try:
-        our_doc = yaml.safe_load(src_yaml.read_text(encoding="utf-8"))
-        our_modes = our_doc.get("customModes", []) if our_doc else []
+        from modes_install import install_modes as _core_install_modes
     except Exception as e:
-        warn(f"Couldn't parse our custom_modes.yaml: {e}")
-        return False
-    if not our_modes:
-        warn("No modes found in modes/custom_modes.yaml.")
+        warn(f"Couldn't load modes_install ({e}) — skipping mode install.")
         return False
 
-    # ── Locate Bob's global custom-modes file ───────────────────
-    # Newer Bob: ~/.bob/settings/custom_modes.yaml. Older: ~/.bob/custom_modes.yaml.
-    settings_dir = home / ".bob" / "settings"
-    candidates = [
-        settings_dir / "custom_modes.yaml",
-        home / ".bob" / "custom_modes.yaml",
-    ]
-    target = next((c for c in candidates if c.exists()), None)
-    if target is None:
-        settings_dir.mkdir(parents=True, exist_ok=True)
-        target = settings_dir / "custom_modes.yaml"
-        existing_modes = []
-    else:
-        try:
-            existing_doc = yaml.safe_load(target.read_text(encoding="utf-8"))
-            existing_modes = (existing_doc.get("customModes", [])
-                              if existing_doc else [])
-        except Exception as e:
-            warn(f"Couldn't parse existing {target.name}: {e} — "
-                 "backing it up and starting fresh.")
-            existing_modes = []
-
-    # ── Merge: drop our slugs from existing, then append ours ───
-    kept = [m for m in existing_modes
-            if m.get("slug") not in _ELM_MODE_SLUGS]
-    merged = kept + our_modes
-
-    # Back up before writing (user may have hand-edited modes)
-    if target.exists():
-        try:
-            shutil.copy2(target, target.with_suffix(".yaml.bak"))
-        except Exception:
-            pass
-
-    try:
-        out = yaml.dump({"customModes": merged},
-                        default_flow_style=False,
-                        sort_keys=False,
-                        allow_unicode=True,
-                        width=10_000)
-        target.write_text(out, encoding="utf-8")
-    except Exception as e:
-        fail(f"Couldn't write merged modes to {target}: {e}")
-        return False
-
-    ok(f"Installed {len(our_modes)} elm-mcp modes into {target}")
-    if kept:
-        info(f"Preserved {len(kept)} of your other custom mode(s).")
-
-    # ── Copy the rules playbooks ────────────────────────────────
-    rules_src = modes_dir / "rules"
-    installed_rules = 0
-    for slug in _ELM_MODE_SLUGS:
-        src = rules_src / f"rules-{slug}"
-        if not src.exists():
-            continue
-        dst = home / ".bob" / f"rules-{slug}"
-        try:
-            dst.mkdir(parents=True, exist_ok=True)
-            for f in src.iterdir():
-                if f.is_file():
-                    shutil.copy2(f, dst / f.name)
-            installed_rules += 1
-        except Exception as e:
-            warn(f"Couldn't copy rules for {slug}: {e}")
-    if installed_rules:
-        ok(f"Installed {installed_rules} mode playbook(s) into ~/.bob/rules-*/")
-
-    return True
+    res = _core_install_modes(HERE, home)
+    if res.get("ok"):
+        ok(res["message"])
+        return True
+    warn(res.get("message") or "Mode install skipped.")
+    return False
 
 
 # ── main ─────────────────────────────────────────────────────

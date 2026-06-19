@@ -85,6 +85,8 @@ path = "doors_mcp_server.py"                # single source of truth: __version_
 "jira_client.py"        = "jira_client.py"
 "req_quality.py"        = "req_quality.py"
 "compliance"            = "compliance"        # *.yaml framework templates (read at runtime)
+"modes"                 = "modes"             # Bob custom-mode defs + playbooks (install_elm_modes tool)
+"modes_install.py"      = "modes_install.py"  # shared mode-install logic
 "requirements.txt"      = "requirements.txt"  # self-heal fallback message references it
 
 [tool.hatch.build.targets.sdist]

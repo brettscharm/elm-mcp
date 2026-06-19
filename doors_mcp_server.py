@@ -176,7 +176,7 @@ load_dotenv()
 # decide if a newer GitHub release exists; the `connect_to_elm`
 # response also surfaces it so users always know what version they're
 # running.
-__version__ = "0.31.9"
+__version__ = "0.32.0"
 GITHUB_REPO = "brettscharm/elm-mcp"
 
 # Server-level instructions — surfaced to the AI host through the MCP protocol
@@ -208,6 +208,13 @@ write requirements into a local markdown or text file; that defeats the purpose.
 - Analysis → `analyze_change_impact`, `find_traceability_gaps`, \
 `generate_compliance_packet`, `generate_traceability_matrix`.
 - Update this server → `update_elm_mcp` (one call; do not run git/pip by hand).
+- Install/refresh the Bob custom modes → `install_elm_modes` (when the user says \
+"I don't see the modes" or "install the elm modes"; also runs automatically on update).
+
+IMPORTANT: anything about THIS server — updating it, installing its modes, \
+health-checking it — is done by CALLING its tools (`update_elm_mcp`, \
+`install_elm_modes`, `elm_mcp_health`). Never search the filesystem or look for \
+npm packages, mcp.json, or install scripts; the tools are already connected.
 
 Gotchas: enum attributes (Status, Priority) expose both a numeric value and a \
 `literalName` — read the literalName. Artifact identifiers are integers. Binding \
@@ -4626,6 +4633,26 @@ async def list_tools() -> list[Tool]:
             }
         ),
         Tool(
+            name="install_elm_modes",
+            description=(
+                "Install or refresh ELM MCP's 5 custom Bob modes (🧭 ELM "
+                "Concierge, 📝 Plan Requirements, 📤 Push Requirements, 🎯 Impact "
+                "Analyst, 📜 Compliance Auditor) into ~/.bob — no terminal "
+                "needed. Use this when the user says 'install the elm modes', "
+                "'I don't see the modes', 'add the concierge mode', 'set up the "
+                "modes', or 'refresh/update the modes'. Merges into Bob's "
+                "custom_modes.yaml, KEEPING every other mode the user has, and "
+                "copies the mode playbooks. The user MUST fully quit and reopen "
+                "Bob afterward for the modes to load (Bob reads modes at "
+                "startup). Bob-only — other AI hosts don't use this mode system."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        ),
+        Tool(
             name="revert_elm_mcp",
             description=(
                 "Roll back the local ELM MCP install to any prior "
@@ -8134,8 +8161,28 @@ async def _dispatch_tool(name: str, arguments: Any) -> list[TextContent]:
                 ))]
             if _git_pull():
                 _record_check_now()
+                # Also refresh the Bob modes from the freshly-pulled
+                # definitions so "update yourself" keeps modes in sync with
+                # the code. Fails open — a mode-refresh hiccup never blocks
+                # the code update.
+                _modes_note = ""
+                try:
+                    import os as _os
+                    from pathlib import Path as _P
+                    from modes_install import install_modes as _imodes, bob_present as _bobp
+                    _home = _P(_os.path.expanduser("~"))
+                    if _bobp(_home):
+                        _mres = _imodes(_P(__file__).resolve().parent, _home)
+                        if _mres.get("ok"):
+                            _modes_note = (
+                                f"\n• Refreshed your {_mres['installed']} Bob "
+                                f"modes too (Concierge, Plan, Push, Impact "
+                                f"Analyst, Compliance Auditor)."
+                            )
+                except Exception:
+                    pass
                 return [TextContent(type="text", text=(
-                    f"✓ Pulled **v{latest}** (was v{__version__}).\n\n"
+                    f"✓ Pulled **v{latest}** (was v{__version__}).{_modes_note}\n\n"
                     f"**Restart your AI assistant** (Bob / Claude Code / etc.) to "
                     f"start using the new version. The currently-running server "
                     f"keeps using v{__version__} until restart — that's deliberate "
@@ -8144,6 +8191,30 @@ async def _dispatch_tool(name: str, arguments: Any) -> list[TextContent]:
             return [TextContent(type="text", text=(
                 f"v{latest} is available but `git pull` failed. "
                 f"Run manually: `cd {_project_dir()} && git pull && python3 setup.py`"
+            ))]
+
+        # ── install_elm_modes (install/refresh Bob modes, no terminal) ──
+        if name == "install_elm_modes":
+            import os as _os
+            from pathlib import Path as _P
+            try:
+                from modes_install import install_modes as _imodes
+            except Exception as e:  # noqa: BLE001
+                return [TextContent(type="text", text=(
+                    f"Couldn't load the mode installer: {e}"
+                ))]
+            _res = _imodes(_P(__file__).resolve().parent,
+                           _P(_os.path.expanduser("~")))
+            if _res["ok"]:
+                return [TextContent(type="text", text=(
+                    f"✓ {_res['message']}\n\n"
+                    f"**Now fully quit and reopen Bob** (macOS: Cmd+Q · Windows: "
+                    f"tray/taskbar icon → Quit) so it loads the modes. Then open "
+                    f"the mode picker and choose **🧭 ELM Concierge** for ELM "
+                    f"work — it routes plain-English requests to the right tool."
+                ))]
+            return [TextContent(type="text", text=(
+                f"Couldn't install the modes: {_res['message']}"
             ))]
 
         # ── revert_elm_mcp (roll back to a prior version) ─────
